@@ -54,9 +54,9 @@ if survey_category == "Poligonação":
     if st.sidebar.button("Gerar Coordenadas Aleatórias"):
         # Use current map center if available
         start_lat, start_lon = default_lat, default_lon
-        if 'survey_map' in st.session_state and st.session_state.survey_map.get('center'):
-            start_lat = st.session_state.survey_map['center']['lat']
-            start_lon = st.session_state.survey_map['center']['lng']
+        if 'map_center' in st.session_state:
+            start_lat = st.session_state.map_center['lat']
+            start_lon = st.session_state.map_center['lng']
 
         gen_end_coords = None
         if survey_type == "Enquadrada" and e2 is not None and n2 is not None:
@@ -97,14 +97,19 @@ with col_map:
             color = "red" if (i == 0 or (survey_category == "Poligonação" and survey_type == "Enquadrada" and i == len(points)-1)) else "blue"
             folium.CircleMarker([lat, lon], radius=6, color=color, fill=True, popup=f"Ponto {i+1}").add_to(m)
 
-    # Optimized st_folium call to avoid Pyodide errors
-    map_data = st_folium(m, use_container_width=True, height=500, key="survey_map")
+    # Optimized st_folium call for Stlite (Pyodide)
+    # Removing 'key' and 'use_container_width' to avoid MarshallComponentException
+    map_data = st_folium(m, width=700, height=500)
 
-    if map_data and map_data.get("last_clicked"):
-        clicked_coords = (map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"])
-        if clicked_coords not in st.session_state.survey_points:
-            st.session_state.survey_points.append(clicked_coords)
-            st.rerun()
+    if map_data:
+        if map_data.get("center"):
+            st.session_state.map_center = map_data["center"]
+
+        if map_data.get("last_clicked"):
+            clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
+            if clicked_coords not in st.session_state.survey_points:
+                st.session_state.survey_points.append(clicked_coords)
+                st.rerun()
 
     if st.button("Limpar Pontos"):
         reset_survey()
