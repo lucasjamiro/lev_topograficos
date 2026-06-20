@@ -34,19 +34,24 @@ if survey_category == "Poligonação":
     n_points = st.sidebar.number_input("1.1.1 Número de vértices", min_value=3, max_value=50, value=5)
 
     st.sidebar.subheader("1.1.2 Coordenadas Conhecidas (UTM)")
-    # Default location (São Paulo)
-    default_lat, default_lon = -23.5505, -46.6333
-    u_e, u_n, u_zone, u_letter = utm.from_latlon(default_lat, default_lon)
+    # Campus Politécnico UFPR
+    default_lat, default_lon = -25.4484, -49.2310
+    u_e, u_n, u_zone, u_letter = 677878.52, 7184223.31, 22, 'J'
 
-    e1 = st.sidebar.number_input("P1 Este (m)", value=float(round(u_e, 2)))
-    n1 = st.sidebar.number_input("P1 Norte (m)", value=float(round(u_n, 2)))
+    e1 = st.sidebar.number_input("HV1 Este (m)", value=u_e, format="%.2f")
+    n1 = st.sidebar.number_input("HV1 Norte (m)", value=u_n, format="%.2f")
 
-    e2, n2 = None, None
+    # User requested HV2 as known point for azimuth
+    e_hv2 = st.sidebar.number_input("HV2 Este (m)", value=u_e + 50.0, format="%.2f")
+    n_hv2 = st.sidebar.number_input("HV2 Norte (m)", value=u_n + 50.0, format="%.2f")
+
+    e_hv_end1, n_hv_end1, e_hv_end2, n_hv_end2 = None, None, None, None
     if survey_type == "Enquadrada":
-        st.sidebar.write(f"Vértice Final (P{n_points}) Conhecido:")
-        # Offset for default end point
-        e2 = st.sidebar.number_input(f"P{n_points} Este (m)", value=float(round(u_e + 200, 2)))
-        n2 = st.sidebar.number_input(f"P{n_points} Norte (m)", value=float(round(u_n + 200, 2)))
+        st.sidebar.write("Vértices de Chegada Conhecidos:")
+        e_hv_end1 = st.sidebar.number_input("HV(n+1) Este (m)", value=u_e + 200.0, format="%.2f")
+        n_hv_end1 = st.sidebar.number_input("HV(n+1) Norte (m)", value=u_n + 200.0, format="%.2f")
+        e_hv_end2 = st.sidebar.number_input("HV(n+2) Este (m)", value=u_e + 250.0, format="%.2f")
+        n_hv_end2 = st.sidebar.number_input("HV(n+2) Norte (m)", value=u_n + 250.0, format="%.2f")
 
     utm_zone = st.sidebar.number_input("Zona UTM", value=u_zone, min_value=1, max_value=60)
     utm_letter = st.sidebar.text_input("Letra UTM", value=u_letter).upper()
@@ -59,9 +64,9 @@ if survey_category == "Poligonação":
             start_lon = st.session_state.map_center['lng']
 
         gen_end_coords = None
-        if survey_type == "Enquadrada" and e2 is not None and n2 is not None:
+        if survey_type == "Enquadrada" and e_hv_end1 is not None and n_hv_end1 is not None:
             # Convert UTM back to Lat/Lon for the generator
-            gen_end_coords = utm.to_latlon(e2, n2, utm_zone, utm_letter)
+            gen_end_coords = utm.to_latlon(e_hv_end1, n_hv_end1, utm_zone, utm_letter)
 
         lats, lons = simulator.generate_traverse_coordinates(
             n_points,
@@ -78,7 +83,7 @@ else: # Nivelamento
     n_points = st.sidebar.number_input("Número de Pontos", min_value=2, max_value=50, value=5)
 
     if st.sidebar.button("Gerar Trajeto de Nivelamento"):
-        lats, lons = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=-23.5505, start_lon=-46.6333)
+        lats, lons = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=-25.4484, start_lon=-49.2310)
         st.session_state.survey_points = list(zip(lats, lons))
 
 # --- Main Layout ---
@@ -86,16 +91,44 @@ col_map, col_data = st.columns([1.2, 0.8])
 
 with col_map:
     st.subheader("Mapa Interativo")
-    center_lat, center_lon = (-23.5505, -46.6333) if not st.session_state.survey_points else st.session_state.survey_points[0]
 
+    # Define labels and colors based on user rules
+    labels = []
+    colors = []
+    max_pts = 999
+
+    if survey_category == "Poligonação":
+        if survey_type == "Fechada":
+            # HV1, HV2, P1, P2... P(n-1) -> Total n+1 points
+            max_pts = n_points + 1
+            for i in range(max_pts):
+                if i == 0: labels.append("HV1"); colors.append("red")
+                elif i == 1: labels.append("HV2"); colors.append("red")
+                else: labels.append(f"P{i-1}"); colors.append("blue")
+        else: # Enquadrada
+            # HV1, HV2, P1... P(n-1), HV(n+1), HV(n+2) -> Total n+3 points
+            max_pts = n_points + 3
+            for i in range(max_pts):
+                if i == 0: labels.append("HV1"); colors.append("red")
+                elif i == 1: labels.append("HV2"); colors.append("red")
+                elif i == max_pts - 2: labels.append(f"HV{n_points+1}"); colors.append("red")
+                elif i == max_pts - 1: labels.append(f"HV{n_points+2}"); colors.append("red")
+                else: labels.append(f"P{i-1}"); colors.append("blue")
+    else: # Nivelamento
+        max_pts = n_points
+        for i in range(max_pts):
+            labels.append(f"P{i+1}")
+            colors.append("red" if i == 0 else "blue")
+
+    center_lat, center_lon = (-25.4484, -49.2310) if not st.session_state.survey_points else st.session_state.survey_points[0]
     m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
 
     if st.session_state.survey_points:
         points = st.session_state.survey_points
-        folium.PolyLine(points, color="blue", weight=2.5).add_to(m)
+        folium.PolyLine(points, color="blue", weight=2.5, dash_array='5, 5' if survey_category=="Poligonação" else None).add_to(m)
         for i, (lat, lon) in enumerate(points):
-            color = "red" if (i == 0 or (survey_category == "Poligonação" and survey_type == "Enquadrada" and i == len(points)-1)) else "blue"
-            folium.CircleMarker([lat, lon], radius=6, color=color, fill=True, popup=f"Ponto {i+1}").add_to(m)
+            if i < len(labels):
+                folium.CircleMarker([lat, lon], radius=6, color=colors[i], fill=True, popup=labels[i]).add_to(m)
 
     # Optimized st_folium call for Stlite (Pyodide)
     # Using returned_objects to minimize serialization overhead and avoid MarshallComponentException
@@ -114,8 +147,9 @@ with col_map:
         if map_data.get("last_clicked"):
             clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
             if clicked_coords not in st.session_state.survey_points:
-                st.session_state.survey_points.append(clicked_coords)
-                st.rerun()
+                if len(st.session_state.survey_points) < max_pts:
+                    st.session_state.survey_points.append(clicked_coords)
+                    st.rerun()
 
     if st.button("Limpar Pontos"):
         reset_survey()
@@ -128,7 +162,8 @@ with col_data:
         utm_data = []
         for i, (lat, lon) in enumerate(st.session_state.survey_points):
             e, n, zone, letter = utm.from_latlon(lat, lon)
-            utm_data.append({"Ponto": f"P{i+1}", "Este (m)": round(e, 2), "Norte (m)": round(n, 2), "Lat": round(lat, 6), "Lon": round(lon, 6)})
+            pt_label = labels[i] if i < len(labels) else f"P{i+1}"
+            utm_data.append({"Ponto": pt_label, "Este (m)": round(e, 2), "Norte (m)": round(n, 2), "Lat": round(lat, 6), "Lon": round(lon, 6)})
 
         df_points = pd.DataFrame(utm_data)
         st.dataframe(df_points[["Ponto", "Este (m)", "Norte (m)"]], use_container_width=True)
@@ -137,7 +172,10 @@ with col_data:
             e_coords = df_points["Este (m)"].values
             n_coords = df_points["Norte (m)"].values
             if survey_category == "Poligonação":
-                st.session_state.survey_data = simulator.simulate_traverse_observations(e_coords, n_coords)
+                st.session_state.survey_data = simulator.simulate_traverse_observations(
+                    e_coords, n_coords,
+                    survey_type="Closed" if survey_type == "Fechada" else "Linked"
+                )
             else:
                 obs, elevs = simulator.simulate_leveling(len(e_coords), type=survey_type, method=method)
                 st.session_state.survey_data = obs
@@ -150,11 +188,12 @@ if st.session_state.survey_data is not None:
     if survey_category == "Poligonação":
         st.subheader("🌐 Resultados da Poligonação (UTM)")
 
-        end_coords = (e2, n2, 100.0) if (e2 is not None and n2 is not None) else None
+        end_coords = (e_hv_end2, n_hv_end2, 100.0) if (e_hv_end2 is not None) else None
 
         pre, raw_coords, errors, adj_coords = simulator.process_traverse_data(
             st.session_state.survey_data,
-            (e1, n1, 100.0),
+            (e1, n1, 100.0), # HV1
+            (e_hv2, n_hv2, 100.0), # HV2
             survey_type="Closed" if survey_type == "Fechada" else "Linked",
             end_coords=end_coords
         )
@@ -172,7 +211,17 @@ if st.session_state.survey_data is not None:
             c2.metric("Erro Planimétrico", f"{errors['Erro Planimétrico (m)']:.3f} m")
             c3.metric("Precisão Relativa", errors['Precisão Relativa'])
             st.metric("Erro Altimétrico", f"{errors['Erro Altimétrico (m)']:.3f} m")
-        with tab5: st.dataframe(adj_coords, use_container_width=True)
+        with tab5:
+            # Reorder columns to have corrections in the middle as requested
+            cols = adj_coords.columns.tolist()
+            # If corrections exist, move them
+            if "Correção E" in cols:
+                # Target order: Ponto, Correção E, Correção N, Correção Z, E, N, Z
+                new_order = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
+                # Keep other columns if any
+                other_cols = [c for c in cols if c not in new_order]
+                adj_coords = adj_coords[new_order + other_cols]
+            st.dataframe(adj_coords, use_container_width=True)
 
     else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
