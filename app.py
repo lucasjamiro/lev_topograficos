@@ -98,8 +98,14 @@ with col_map:
             folium.CircleMarker([lat, lon], radius=6, color=color, fill=True, popup=f"Ponto {i+1}").add_to(m)
 
     # Optimized st_folium call for Stlite (Pyodide)
-    # Removing 'key' and 'use_container_width' to avoid MarshallComponentException
-    map_data = st_folium(m, width=700, height=500)
+    # Using returned_objects to minimize serialization overhead and avoid MarshallComponentException
+    map_data = st_folium(
+        m,
+        width=None,
+        height=500,
+        returned_objects=["last_clicked", "center"],
+        use_container_width=True
+    )
 
     if map_data:
         if map_data.get("center"):

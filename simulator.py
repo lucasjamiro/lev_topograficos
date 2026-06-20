@@ -145,7 +145,7 @@ def simulate_traverse_observations(e_coords, n_coords, angle_sigma=0.01, dist_si
 
     return pd.DataFrame(observations)
 
-def process_traverse_data(df, start_coords, survey_type="Fechada", end_coords=None):
+def process_traverse_data(df, start_coords, survey_type="Closed", end_coords=None):
     """
     Implements the full processing chain including Bowditch adjustment.
     df: Raw observations
@@ -183,7 +183,7 @@ def process_traverse_data(df, start_coords, survey_type="Fechada", end_coords=No
 
     # 3. Closure Errors
     total_dist = pre["Dist. Horizontal (m)"].sum()
-    if survey_type == "Fechada":
+    if survey_type == "Closed":
         err_e = raw_coords[-1]["E"] - raw_coords[0]["E"]
         err_n = raw_coords[-1]["N"] - raw_coords[0]["N"]
         err_z = raw_coords[-1]["Z"] - raw_coords[0]["Z"]
