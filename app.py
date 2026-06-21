@@ -37,8 +37,9 @@ challenge_mode = st.sidebar.toggle("🎯 Modo Desafio", help="Esconde os resulta
 
 if survey_category == "Poligonação":
     survey_type = st.sidebar.radio("1.1 Tipo de Poligonal", ["Fechada", "Enquadrada"], on_change=reset_survey)
-    min_pts = 4 if survey_type == "Enquadrada" else 3
-    n_points = st.sidebar.number_input("1.1.1 Número de vértices", min_value=min_pts, max_value=50, value=max(5, min_pts))
+    # n_points represents the number of setup stations
+    min_pts = 3
+    n_points = st.sidebar.number_input("1.1.1 Número de Estações de Medição", min_value=min_pts, max_value=50, value=5)
 
     st.sidebar.subheader("1.1.2 Coordenadas Conhecidas (UTM)")
     # Campus Politécnico UFPR
@@ -127,13 +128,15 @@ with col_map:
     max_pts = 999
 
     if survey_category == "Poligonação":
-        max_pts = n_points
+        max_pts = n_points if survey_type == "Fechada" else n_points + 2
         if survey_type == "Fechada":
             for i in range(max_pts):
                 if i == 0: labels.append("HV1"); colors.append("red")
                 elif i == 1: labels.append("HV2"); colors.append("red")
                 else: labels.append(f"P{i-1}"); colors.append("blue")
         else: # Enquadrada
+            # Sequence: HV1, HV2, P1, P2... HV(n-1), HV(n)
+            # Total points: n + 2
             for i in range(max_pts):
                 if i == 0: labels.append("HV1"); colors.append("red")
                 elif i == 1: labels.append("HV2"); colors.append("red")
