@@ -39,14 +39,16 @@ def test_linked_traverse_math():
     print("\nAdjusted Coordenates:")
     print(adj[['Ponto', 'E', 'N']])
 
-    # Check if final point is close to target
-    target_e = 500
-    target_n = 0
-    calc_e = adj.iloc[-1]['E']
-    calc_n = adj.iloc[-1]['N']
+    # Check if HV4 and HV5 are correct in adjusted list
+    # adj columns: Ponto, E, N, H
+    hv4_row = adj[adj['Ponto'] == 'HV4'].iloc[0]
+    hv5_row = adj[adj['Ponto'] == 'HV5'].iloc[0]
 
-    assert abs(calc_e - target_e) < 0.1, f"Expected E={target_e}, got {calc_e}"
-    assert abs(calc_n - target_n) < 0.1, f"Expected N={target_n}, got {calc_n}"
+    assert abs(hv4_row['E'] - 500) < 0.1, f"Expected HV4 E=500, got {hv4_row['E']}"
+    assert abs(hv4_row['N'] - 0) < 0.1, f"Expected HV4 N=0, got {hv4_row['N']}"
+    assert abs(hv5_row['E'] - 600) < 0.1, f"Expected HV5 E=600, got {hv5_row['E']}"
+    assert abs(hv5_row['N'] - 0) < 0.1, f"Expected HV5 N=0, got {hv5_row['N']}"
+
     print("\nLinked Traverse Math Test Passed!")
 
 def test_closed_traverse_math():
@@ -70,11 +72,11 @@ def test_closed_traverse_math():
     print(errors)
 
     # For closed traverse, the last point in adj should be HV2 again
-    calc_e = adj.iloc[-1]['E']
-    calc_n = adj.iloc[-1]['N']
+    last_row = adj.iloc[-1]
+    assert last_row['Ponto'] == 'HV2', f"Expected last point HV2, got {last_row['Ponto']}"
 
-    assert abs(calc_e - 100) < 0.1, f"Expected E=100, got {calc_e}"
-    assert abs(calc_n - 0) < 0.1, f"Expected N=0, got {calc_n}"
+    assert abs(last_row['E'] - 100) < 0.1, f"Expected E=100, got {last_row['E']}"
+    assert abs(last_row['N'] - 0) < 0.1, f"Expected N=0, got {last_row['N']}"
     print("Closed Traverse Math Test Passed!")
 
 if __name__ == "__main__":
