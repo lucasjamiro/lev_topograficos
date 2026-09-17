@@ -9,216 +9,359 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
     azimuth = np.degrees(np.arctan2(y, x))
     return (azimuth + 360) % 360
 
+import utm
+
+def get_traverse_labels(n_points, survey_type="Closed"):
+    """
+    Returns point labels based on survey type and user input n_points:
+    - Linked (Enquadrada): n_points intermediate stations (P1..Pn) + 4 control points (HV1, HV2, HV4, HV5) -> Total = n_points + 4
+    - Closed (Fechada): total n_points vertices = HV1, HV2, P1, ..., P_{n-2} -> Total = n_points
+    """
+    if survey_type in ["Linked", "Enquadrada"]:
+        return ["HV1", "HV2"] + [f"P{i+1}" for i in range(n_points)] + ["HV4", "HV5"]
+    else:
+        # For closed traverse, total vertices = n_points (HV1, HV2, P1, ..., P_{n-2})
+        n_p = max(0, n_points - 2)
+        return ["HV1", "HV2"] + [f"P{i+1}" for i in range(n_p)]
+
 def generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=-23.5505, start_lon=-46.6333, scale=0.001, end_coords=None):
     """
-    Generates a set of coordinates for a traverse survey.
-    scale: rough distance between points in degrees (approx 100m)
+    Generates UTM-based coordinates for traverse points and returns (lats, lons, labels).
     """
-    if survey_type == "Closed":
-        # For a closed traverse, we start and end at the same point (conceptually)
-        # but usually we have a sequence P1, P2, ..., Pn, P1.
-        # The user says "fechadas precisam apenas de um par de pontos conhecido"
-        # This usually means P1 and another point to give orientation, or P1 and P2 are known.
+    labels = get_traverse_labels(n_points, survey_type)
+    e0, n0, zone_num, zone_let = utm.from_latlon(float(start_lat), float(start_lon))
 
-        angles = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
-        radius = scale * (n_points / (2 * np.pi))
+    utm_points = []
 
-        lats = []
-        lons = []
-        for angle in angles:
-            r = radius * np.random.uniform(0.8, 1.2)
-            lats.append(start_lat + np.cos(angle) * r)
-            lons.append(start_lon + np.sin(angle) * r)
-
-        # Center them around start_lat, start_lon for better control if needed,
-        # but let's just make P1 be exactly start_lat, start_lon
-        offset_lat = start_lat - lats[0]
-        offset_lon = start_lon - lons[0]
-        lats = [lat + offset_lat for lat in lats]
-        lons = [lon + offset_lon for lon in lons]
-
-        # Close the loop
-        lats.append(lats[0])
-        lons.append(lons[0])
-    elif survey_type == "Linked":
-        # Linked (Enquadrada) needs start and end points.
-        # The user says "no mínimo um par de pontos conhecidos no começo e no final"
-        # So we might have A, B (known) ... 1, 2, 3 ... C, D (known)
-
-        lats = [start_lat]
-        lons = [start_lon]
+    if survey_type in ["Linked", "Enquadrada"]:
+        # HV2 at start_lat, start_lon
+        hv2_e, hv2_n = float(e0), float(n0)
+        # HV1 for initial orientation check
+        hv1_e, hv1_n = hv2_e - 50.0, hv2_n - 30.0
 
         if end_coords:
-            end_lat, end_lon = end_coords
-            # Interpolate points between start and end with some randomness
-            for i in range(1, n_points - 1):
-                frac = i / (n_points - 1)
-                lat = start_lat + frac * (end_lat - start_lat) + np.random.uniform(-scale/2, scale/2)
-                lon = start_lon + frac * (end_lon - start_lon) + np.random.uniform(-scale/2, scale/2)
-                lats.append(lat)
-                lons.append(lon)
-            lats.append(end_lat)
-            lons.append(end_lon)
+            hv4_e, hv4_n, _, _ = utm.from_latlon(float(end_coords[0]), float(end_coords[1]))
+            hv4_e, hv4_n = float(hv4_e), float(hv4_n)
         else:
-            current_lat, current_lon = start_lat, start_lon
-            base_angle = np.pi / 4
-            for i in range(n_points - 1):
-                angle = base_angle + np.random.uniform(-np.pi/4, np.pi/4)
-                current_lat += np.cos(angle) * scale
-                current_lon += np.sin(angle) * scale
-                lats.append(current_lat)
-                lons.append(current_lon)
+            hv4_e = hv2_e + (n_points + 1) * 80.0
+            hv4_n = hv2_n + (n_points + 1) * 40.0
 
-    return np.array(lats), np.array(lons)
+        hv5_e, hv5_n = hv4_e + 50.0, hv4_n + 30.0
 
-def simulate_traverse_observations(lats, lons, angle_sigma=0.01, dist_sigma=0.005, elev_sigma=0.02):
+        utm_points.append((hv1_e, hv1_n))
+        utm_points.append((hv2_e, hv2_n))
+
+        for i in range(1, n_points + 1):
+            frac = i / (n_points + 1)
+            noise_e = float(np.random.uniform(-10, 10))
+            noise_n = float(np.random.uniform(-10, 10))
+            p_e = hv2_e + frac * (hv4_e - hv2_e) + noise_e
+            p_n = hv2_n + frac * (hv4_n - hv2_n) + noise_n
+            utm_points.append((p_e, p_n))
+
+        utm_points.append((hv4_e, hv4_n))
+        utm_points.append((hv5_e, hv5_n))
+
+    else:
+        # Closed traverse: total n_points vertices = HV1, HV2, P1...P_{n-2}
+        hv2_e, hv2_n = float(e0), float(n0)
+        hv1_e, hv1_n = hv2_e - 60.0, hv2_n - 20.0
+
+        utm_points.append((hv1_e, hv1_n))
+        utm_points.append((hv2_e, hv2_n))
+
+        n_p = max(0, n_points - 2)
+        if n_p > 0:
+            # Generate intermediate points in a loop returning back towards HV1/HV2
+            # Total loop points = n_points (from HV2 around to P_{n-2} and closing to HV2)
+            n_vertices = n_points
+            radius = 100.0
+            # Center of closed loop offset from HV2
+            center_e = hv2_e - radius / 2.0
+            center_n = hv2_n
+            # Base angle for HV2 relative to center
+            start_angle = np.arctan2(hv2_n - center_n, hv2_e - center_e)
+
+            for i in range(1, n_p + 1):
+                angle = start_angle + (2 * np.pi * i / n_vertices)
+                noise_e = float(np.random.uniform(-5, 5))
+                noise_n = float(np.random.uniform(-5, 5))
+                p_e = center_e + radius * np.cos(angle) + noise_e
+                p_n = center_n + radius * np.sin(angle) + noise_n
+                utm_points.append((p_e, p_n))
+
+    lats = []
+    lons = []
+    for e, n in utm_points:
+        lat, lon = utm.to_latlon(e, n, zone_num, zone_let)
+        lats.append(float(lat))
+        lons.append(float(lon))
+
+    return np.array(lats, dtype=float), np.array(lons, dtype=float), labels
+
+def simulate_traverse_observations(lats, lons, labels=None, survey_type="Closed", angle_sigma=0.001, dist_sigma=0.005, elev_sigma=0.02):
     """
-    Simulates raw field observations for a traverse.
-    Returns a DataFrame with: Estação, Ré, Vante, Dir. Ré, Dir. Vante, Ang. Zenital, Dist. Inclinada
+    Simulates raw field observations for a traverse using UTM coordinates.
+    Returns a DataFrame with: Estação, Ré, Vante, Dir. Ré, Dir. Vante, Ângulo Zenital, Dist. Inclinada
     """
     n = len(lats)
+    if labels is None:
+        labels = get_traverse_labels(n, survey_type)
+
+    utm_coords = []
+    for lat, lon in zip(lats, lons):
+        e, n_val, _, _ = utm.from_latlon(float(lat), float(lon))
+        utm_coords.append((float(e), float(n_val)))
+
+    elevations = np.cumsum(np.random.normal(0, 0.2, n)) + 100.0
+
+    setups = []
+    if survey_type in ["Linked", "Enquadrada"]:
+        # Setups run from HV2 (idx 1) through HV4 (idx n-2)
+        # Sequence: [HV1(0), HV2(1), P1(2)... Pn(n-3), HV4(n-2), HV5(n-1)]
+        for st_idx in range(1, n - 1):
+            bs_idx = st_idx - 1
+            fs_idx = st_idx + 1
+            setups.append((st_idx, bs_idx, fs_idx))
+    else:
+        # Closed traverse sequence: [HV1(0), HV2(1), P1(2)... P_{n-2}(n-1)]
+        # Initial orientation setup at HV2: BS=HV1(0), FS=P1(2)
+        first_fs = 2 if n > 2 else 1
+        setups.append((1, 0, first_fs))
+
+        # Intermediate station setups P1..P_{n-2}
+        for st_idx in range(2, n):
+            bs_idx = st_idx - 1
+            fs_idx = st_idx + 1 if st_idx + 1 < n else 1 # Last station sights back to HV2(1)
+            setups.append((st_idx, bs_idx, fs_idx))
+
+        # Final closure station setup at HV2: BS=last_point (n-1), FS=P1 (first_fs)
+        setups.append((1, n - 1, first_fs))
+
     observations = []
+    for st_idx, bs_idx, fs_idx in setups:
+        e_s, n_s = utm_coords[st_idx]
+        e_b, n_b = utm_coords[bs_idx]
+        e_f, n_f = utm_coords[fs_idx]
 
-    # We assume elevations for the points as well
-    elevations = np.cumsum(np.random.normal(0, 0.5, n)) + 100.0
+        az_bs = np.degrees(np.arctan2(e_b - e_s, n_b - n_s)) % 360
+        az_fs = np.degrees(np.arctan2(e_f - e_s, n_f - n_s)) % 360
 
-    for i in range(n):
-        # Current station is i
-        # BS is i-1 (or i-1 % n for closed)
-        # FS is i+1 (if exists)
-
-        if i == 0:
-            # First station. BS is usually a reference or a known point.
-            # For simplicity, let's assume BS is a virtual point at North
-            re_idx = -1 # Virtual
-            vante_idx = 1
-        elif i == n - 1:
-            re_idx = i - 1
-            vante_idx = 0 # Closed traverse back to start
-        else:
-            re_idx = i - 1
-            vante_idx = i + 1
-
-        if vante_idx >= n and i == n - 1:
-            continue # End of linked traverse
-
-        # Distances and Azimuths
-        d_inc_true = np.sqrt(((lats[vante_idx]-lats[i])*111139)**2 + ((lons[vante_idx]-lons[i])*111139)**2 + (elevations[vante_idx]-elevations[i])**2)
-        d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
-
-        # Directions
-        # Let's say BS direction is always around 0 (arbitrary)
-        dir_re = np.random.uniform(0, 360)
-
-        # Calculate true horizontal angle
-        az_fs = calculate_azimuth(lats[i], lons[i], lats[vante_idx], lons[vante_idx])
-        if re_idx == -1:
-            az_re = 0 # Reference North
-        else:
-            az_re = calculate_azimuth(lats[i], lons[i], lats[re_idx], lons[re_idx])
-
-        true_angle = (az_fs - az_re + 360) % 360
+        true_angle = (az_fs - az_bs + 360) % 360
+        dir_re = float(np.random.uniform(0, 360))
         dir_vante = (dir_re + true_angle + np.random.normal(0, angle_sigma)) % 360
 
-        # Zenith Angle
-        d_horiz_true = np.sqrt(((lats[vante_idx]-lats[i])*111139)**2 + ((lons[vante_idx]-lons[i])*111139)**2)
-        zenith_true = np.degrees(np.arctan2(d_horiz_true, elevations[vante_idx] - elevations[i]))
-        # Note: 90 deg is horizontal. Let's make it more realistic (near 90)
-        # zenith = 90 - slope.
-        slope_angle = np.degrees(np.arctan2(elevations[vante_idx] - elevations[i], d_horiz_true))
-        zenith_measured = 90 - slope_angle + np.random.normal(0, angle_sigma)
+        d_horiz_true = np.sqrt((e_f - e_s)**2 + (n_f - n_s)**2)
+        dz = elevations[fs_idx] - elevations[st_idx]
+        d_inc_true = np.sqrt(d_horiz_true**2 + dz**2)
+        d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
+
+        slope_angle = np.degrees(np.arctan2(dz, d_horiz_true))
+        zenith_measured = 90.0 - slope_angle + np.random.normal(0, angle_sigma)
 
         observations.append({
-            "Estação": f"P{i+1}",
-            "Ré": "REF_N" if re_idx == -1 else f"P{re_idx+1}",
-            "Vante": f"P{vante_idx+1}",
-            "Dir. Ré (°)": round(dir_re, 4),
-            "Dir. Vante (°)": round(dir_vante, 4),
-            "Ângulo Zenital (°)": round(zenith_measured, 4),
-            "Dist. Inclinada (m)": round(d_inc_measured, 3)
+            "Estação": labels[st_idx],
+            "Ré": labels[bs_idx],
+            "Vante": labels[fs_idx],
+            "Dir. Ré (°)": round(float(dir_re), 4),
+            "Dir. Vante (°)": round(float(dir_vante), 4),
+            "Ângulo Zenital (°)": round(float(zenith_measured), 4),
+            "Dist. Inclinada (m)": round(float(d_inc_measured), 3)
         })
 
     return pd.DataFrame(observations)
 
-def process_traverse_data(df, start_coords, survey_type="Fechada"):
+def process_traverse_data(df, known_dict, survey_type="Fechada"):
     """
-    Implements the full processing chain including Bowditch adjustment.
-    df: Raw observations
-    start_coords: (lat, lon, elev)
+    Implements the full rigorous processing chain:
+    1. Initial Azimuth (Az_start) between HV1 -> HV2.
+    2. Target Azimuth (Az_target) between HV4 -> HV5 (Linked) or HV2 -> P1 (Closed).
+    3. Azimuth propagation across all station setups using horizontal angles.
+    4. True Angular Error e_A computation and equal distribution of -e_A.
+    5. Horizontal distance and provisional coordinate calculation.
+    6. True Linear Closure Error (e_E, e_N, e_Z) at arrival station (HV4 for Linked, HV2 for Closed).
+    7. Bowditch adjustment proportional to distance.
+    Returns: pre, raw_coords, errors, adj_coords with columns: Ponto, Correção E, Correção N, Correção Z, E, N, Z
     """
+    is_linked = survey_type in ["Linked", "Enquadrada"]
+
     # 1. Pre-calculated data
     pre = df.copy()
     pre["Ângulo Horiz. (°)"] = (pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360
     pre["Dist. Horizontal (m)"] = pre["Dist. Inclinada (m)"] * np.sin(np.radians(pre["Ângulo Zenital (°)"]))
     pre["ΔH (m)"] = pre["Dist. Inclinada (m)"] * np.cos(np.radians(pre["Ângulo Zenital (°)"]))
 
-    # 2. Raw Coordinates (Dead Reckoning)
-    # Assume first station has known coords and starting azimuth (from REF_N = 0)
-    # So first segment azimuth = AH of first station
-    current_az = pre.iloc[0]["Ângulo Horiz. (°)"]
+    hv1 = known_dict["HV1"]
+    hv2 = known_dict["HV2"]
+    az_start = np.degrees(np.arctan2(hv2[0] - hv1[0], hv2[1] - hv1[1])) % 360
 
-    raw_coords = [{"Ponto": "P1", "X": 0.0, "Y": 0.0, "Z": start_coords[2]}]
-    # We use local X, Y in meters for Bowditch
+    if is_linked:
+        hv4 = known_dict["HV4"]
+        hv5 = known_dict["HV5"]
+        az_target = np.degrees(np.arctan2(hv5[0] - hv4[0], hv5[1] - hv4[1])) % 360
+    else:
+        angle_0 = pre.iloc[0]["Ângulo Horiz. (°)"]
+        az_target = (az_start - 180.0 + angle_0 + 360) % 360
 
-    for i in range(len(pre)):
-        if i > 0:
-            # Az_n = Az_{n-1} + AH_n - 180 (simplified)
-            # Actually if AH is interior: Az_n = Az_{n-1} + AH_n - 180
-            # Let's use a simpler cumulative azimuth for this simulator
-            current_az = (current_az + pre.iloc[i]["Ângulo Horiz. (°)"] - 180 + 360) % 360
+    n_setups = len(pre)
+    propagated_az = []
+    current_az = az_start
+    for i in range(n_setups):
+        angle = pre.iloc[i]["Ângulo Horiz. (°)"]
+        if i == 0:
+            az_i = (az_start - 180.0 + angle + 360) % 360
+        else:
+            az_i = (current_az + angle - 180.0 + 360) % 360
+        propagated_az.append(az_i)
+        current_az = az_i
 
-        dist = pre.iloc[i]["Dist. Horizontal (m)"]
-        dx = dist * np.sin(np.radians(current_az))
-        dy = dist * np.cos(np.radians(current_az))
-        dz = pre.iloc[i]["ΔH (m)"]
+    az_final_propagated = propagated_az[-1]
+    e_A = (az_final_propagated - az_target + 180) % 360 - 180
+    corr_per_station = -e_A / n_setups
 
-        last = raw_coords[-1]
+    corrected_az = []
+    current_az = az_start
+    for i in range(n_setups):
+        angle = pre.iloc[i]["Ângulo Horiz. (°)"]
+        if i == 0:
+            az_i = (az_start - 180.0 + angle + corr_per_station + 360) % 360
+        else:
+            az_i = (current_az + angle - 180.0 + corr_per_station + 360) % 360
+        corrected_az.append(az_i)
+        current_az = az_i
+
+    # Segment setups for coordinate propagation
+    leg_setups = pre.iloc[:n_setups] if is_linked else pre.iloc[:n_setups - 1]
+    leg_az = corrected_az[:n_setups] if is_linked else corrected_az[:n_setups - 1]
+
+    e_curr, n_curr, z_curr = hv2[0], hv2[1], hv2[2]
+    raw_coords = [{
+        "Ponto": "HV2",
+        "Correção E": 0.0,
+        "Correção N": 0.0,
+        "Correção Z": 0.0,
+        "E": round(float(e_curr), 3),
+        "N": round(float(n_curr), 3),
+        "Z": round(float(z_curr), 3)
+    }]
+
+    total_dist = leg_setups["Dist. Horizontal (m)"].sum()
+    prov_points = []
+
+    for idx in range(len(leg_setups)):
+        row = leg_setups.iloc[idx]
+        az = leg_az[idx]
+        d_h = row["Dist. Horizontal (m)"]
+        dz = row["ΔH (m)"]
+
+        de = d_h * np.sin(np.radians(az))
+        dn = d_h * np.cos(np.radians(az))
+
+        e_curr += de
+        n_curr += dn
+        z_curr += dz
+
+        prov_points.append({
+            "Ponto": row["Vante"],
+            "E": float(e_curr),
+            "N": float(n_curr),
+            "Z": float(z_curr),
+            "d_h": float(d_h)
+        })
         raw_coords.append({
-            "Ponto": pre.iloc[i]["Vante"],
-            "X": round(last["X"] + dx, 3),
-            "Y": round(last["Y"] + dy, 3),
-            "Z": round(last["Z"] + dz, 3)
+            "Ponto": row["Vante"],
+            "Correção E": 0.0,
+            "Correção N": 0.0,
+            "Correção Z": 0.0,
+            "E": round(float(e_curr), 3),
+            "N": round(float(n_curr), 3),
+            "Z": round(float(z_curr), 3)
         })
 
-    # 3. Closure Errors
-    total_dist = pre["Dist. Horizontal (m)"].sum()
-    if survey_type == "Fechada":
-        err_x = raw_coords[-1]["X"] - raw_coords[0]["X"]
-        err_y = raw_coords[-1]["Y"] - raw_coords[0]["Y"]
-        err_z = raw_coords[-1]["Z"] - raw_coords[0]["Z"]
-    else:
-        # Linked: we would compare with target coordinates.
-        # For simplicity, let's just use the small noise as error.
-        err_x = np.random.normal(0, 0.1)
-        err_y = np.random.normal(0, 0.1)
-        err_z = np.random.normal(0, 0.05)
+    target_arrival = known_dict["HV4"] if is_linked else known_dict["HV2"]
+    e_arrival_calc = prov_points[-1]["E"]
+    n_arrival_calc = prov_points[-1]["N"]
+    z_arrival_calc = prov_points[-1]["Z"]
 
-    err_plan = np.sqrt(err_x**2 + err_y**2)
+    e_E = e_arrival_calc - target_arrival[0]
+    e_N = n_arrival_calc - target_arrival[1]
+    e_Z = z_arrival_calc - target_arrival[2]
+    err_plan = np.sqrt(e_E**2 + e_N**2)
 
     errors = {
-        "Erro Angular (°)": round(np.random.normal(0, 0.001), 5),
-        "Erro Planimétrico (m)": round(err_plan, 3),
-        "Erro Altimétrico (m)": round(err_z, 3),
-        "Precisão Relativa": f"1/{int(total_dist/err_plan) if err_plan > 0 else 'inf'}"
+        "Erro Angular (°)": round(float(e_A), 5),
+        "Erro Planimétrico (m)": round(float(err_plan), 3),
+        "Erro Altimétrico (m)": round(float(e_Z), 3),
+        "Precisão Relativa": f"1/{int(total_dist / err_plan) if err_plan > 0 else 'inf'}"
     }
 
-    # 4. Bowditch Adjustment (Compass Rule)
-    # Correction_x_i = - err_x * (dist_i / total_dist)
-    adj_coords = [raw_coords[0].copy()]
-    cum_dist = 0
-    for i in range(len(pre)):
-        cum_dist += pre.iloc[i]["Dist. Horizontal (m)"]
-        corr_x = -err_x * (cum_dist / total_dist)
-        corr_y = -err_y * (cum_dist / total_dist)
-        corr_z = -err_z * (cum_dist / total_dist)
+    # Bowditch Adjustment
+    adj_coords = [{
+        "Ponto": "HV2",
+        "Correção E": 0.0,
+        "Correção N": 0.0,
+        "Correção Z": 0.0,
+        "E": round(float(hv2[0]), 3),
+        "N": round(float(hv2[1]), 3),
+        "Z": round(float(hv2[2]), 3)
+    }]
 
-        pt = raw_coords[i+1].copy()
-        pt["X"] = round(pt["X"] + corr_x, 3)
-        pt["Y"] = round(pt["Y"] + corr_y, 3)
-        pt["Z"] = round(pt["Z"] + corr_z, 3)
-        adj_coords.append(pt)
+    cum_d = 0.0
+    for pt in prov_points:
+        cum_d += pt["d_h"]
+        frac = cum_d / total_dist if total_dist > 0 else 0
+        corr_e = -e_E * frac
+        corr_n = -e_N * frac
+        corr_z = -e_Z * frac
 
-    return pre, pd.DataFrame(raw_coords), errors, pd.DataFrame(adj_coords)
+        adj_e = pt["E"] + corr_e
+        adj_n = pt["N"] + corr_n
+        adj_z = pt["Z"] + corr_z
+
+        adj_coords.append({
+            "Ponto": pt["Ponto"],
+            "Correção E": round(float(corr_e), 3),
+            "Correção N": round(float(corr_n), 3),
+            "Correção Z": round(float(corr_z), 3),
+            "E": round(float(adj_e), 3),
+            "N": round(float(adj_n), 3),
+            "Z": round(float(adj_z), 3)
+        })
+
+    raw_df = pd.DataFrame(raw_coords)
+    adj_df = pd.DataFrame(adj_coords)
+
+    # Prepend HV1
+    hv1_row = {
+        "Ponto": "HV1",
+        "Correção E": 0.0,
+        "Correção N": 0.0,
+        "Correção Z": 0.0,
+        "E": round(float(hv1[0]), 3),
+        "N": round(float(hv1[1]), 3),
+        "Z": round(float(hv1[2]), 3)
+    }
+    raw_df = pd.concat([pd.DataFrame([hv1_row]), raw_df], ignore_index=True)
+    adj_df = pd.concat([pd.DataFrame([hv1_row]), adj_df], ignore_index=True)
+
+    if is_linked and "HV5" in known_dict:
+        hv5 = known_dict["HV5"]
+        hv5_row = {
+            "Ponto": "HV5",
+            "Correção E": 0.0,
+            "Correção N": 0.0,
+            "Correção Z": 0.0,
+            "E": round(float(hv5[0]), 3),
+            "N": round(float(hv5[1]), 3),
+            "Z": round(float(hv5[2]), 3)
+        }
+        # Check if HV5 is not already the last row
+        if raw_df.iloc[-1]["Ponto"] != "HV5":
+            raw_df = pd.concat([raw_df, pd.DataFrame([hv5_row])], ignore_index=True)
+            adj_df = pd.concat([adj_df, pd.DataFrame([hv5_row])], ignore_index=True)
+
+    cols = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
+    return pre, raw_df[cols], errors, adj_df[cols]
 
 def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start_elev=100.0, error_per_km=0.005):
     """
@@ -245,11 +388,13 @@ def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start
 
             bs = np.random.uniform(1.0, 2.5)
             fs = bs - measured_delta_h
+            inst_height = elevations[i-1] + bs
 
             obs = {
                 "Estação": f"E{i}",
                 "Ponto": f"P{i+1}",
                 "V. Ré (m)": round(bs, 3),
+                "AI (m)": round(inst_height, 3),
                 "V. Vante (m)": round(fs, 3),
                 "Dist (m)": round(dist, 1),
                 "Método": method

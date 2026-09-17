@@ -10,14 +10,24 @@ st.set_page_config(page_title="Simulador Topográfico Interativo", layout="wide"
 # --- Session State Initialization ---
 if 'survey_points' not in st.session_state:
     st.session_state.survey_points = []  # List of (lat, lon)
+if 'point_labels' not in st.session_state:
+    st.session_state.point_labels = []
 if 'survey_data' not in st.session_state:
     st.session_state.survey_data = None
+if 'known_points_dict' not in st.session_state:
+    st.session_state.known_points_dict = {}
 if 'user_results' not in st.session_state:
     st.session_state.user_results = {}
+if 'map_center' not in st.session_state:
+    st.session_state.map_center = [-23.5505, -46.6333]
+if 'map_zoom' not in st.session_state:
+    st.session_state.map_zoom = 16
 
 def reset_survey():
     st.session_state.survey_points = []
+    st.session_state.point_labels = []
     st.session_state.survey_data = None
+    st.session_state.known_points_dict = {}
     st.session_state.user_results = {}
 
 st.title("🏗️ Simulador de Levantamentos Topográficos")
@@ -57,10 +67,13 @@ if survey_category == "Poligonação":
             c_lat, c_lon = p1_lat, p1_lon
 
         if survey_type == "Fechada":
-            lats, lons = simulator.generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=c_lat, start_lon=c_lon)
+            lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=c_lat, start_lon=c_lon)
         else:
-            lats, lons = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=c_lat, start_lon=c_lon, end_coords=(pn_lat, pn_lon))
-        st.session_state.survey_points = list(zip(lats, lons))
+            lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=c_lat, start_lon=c_lon, end_coords=(pn_lat, pn_lon))
+        st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
+        st.session_state.point_labels = list(labels)
+        if st.session_state.survey_points:
+            st.session_state.map_center = [float(st.session_state.survey_points[0][0]), float(st.session_state.survey_points[0][1])]
 
 else: # Nivelamento
     survey_type = st.sidebar.radio("1.2 Tipo de Nivelamento", ["Geométrico", "Trigonométrico"], on_change=reset_survey)
@@ -74,8 +87,11 @@ else: # Nivelamento
     start_lon = st.sidebar.number_input("Longitude Inicial", value=-46.6333, format="%.6f")
 
     if st.sidebar.button("Gerar Trajeto de Nivelamento"):
-        lats, lons = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=start_lat, start_lon=start_lon)
-        st.session_state.survey_points = list(zip(lats, lons))
+        lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=start_lat, start_lon=start_lon)
+        st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
+        st.session_state.point_labels = [f"P{i+1}" for i in range(len(lats))]
+        if st.session_state.survey_points:
+            st.session_state.map_center = [float(st.session_state.survey_points[0][0]), float(st.session_state.survey_points[0][1])]
 
 # --- Main Layout ---
 
@@ -84,31 +100,35 @@ col_map, col_data = st.columns([1.2, 0.8])
 with col_map:
     st.subheader("Mapa Interativo")
 
-    if st.session_state.survey_points:
-        center_lat = st.session_state.survey_points[0][0]
-        center_lon = st.session_state.survey_points[0][1]
-    else:
-        center_lat, center_lon = -23.5505, -46.6333
-
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
+    m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
 
     if st.session_state.survey_points:
-        points = st.session_state.survey_points
+        points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
+        labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(points) else [f"P{i+1}" for i in range(len(points))]
         folium.PolyLine(points, color="blue", weight=2.5, opacity=0.8).add_to(m)
         for i, (lat, lon) in enumerate(points):
-            color = "red" if (i == 0 or (survey_category == "Poligonação" and survey_type == "Enquadrada" and i == len(points)-1)) else "blue"
+            lbl = labels[i]
+            color = "red" if "HV" in lbl else "blue"
             folium.CircleMarker(
                 [lat, lon], radius=6, color=color, fill=True,
-                popup=f"Ponto {i+1}"
+                popup=f"Ponto {lbl}", tooltip=f"Ponto {lbl}"
             ).add_to(m)
 
     st.info("Clique no mapa para adicionar vértices manualmente.")
-    map_data = st_folium(m, width=700, height=500, key="survey_map")
+    map_data = st_folium(m, width=700, height=500, returned_objects=["last_clicked", "center", "zoom"])
 
-    if map_data.get("last_clicked"):
-        clicked_coords = (map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"])
+    if map_data:
+        if map_data.get("center"):
+            st.session_state.map_center = [float(map_data["center"]["lat"]), float(map_data["center"]["lng"])]
+        if map_data.get("zoom"):
+            st.session_state.map_zoom = int(map_data["zoom"])
+
+    if map_data and map_data.get("last_clicked"):
+        clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
         if clicked_coords not in st.session_state.survey_points:
             st.session_state.survey_points.append(clicked_coords)
+            next_idx = len(st.session_state.survey_points)
+            st.session_state.point_labels.append(f"P{next_idx}")
             st.rerun()
 
     if st.button("Limpar Pontos"):
@@ -118,15 +138,25 @@ with col_map:
 with col_data:
     st.subheader("Dados dos Vértices")
     if st.session_state.survey_points:
+        labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(st.session_state.survey_points) else [f"P{i+1}" for i in range(len(st.session_state.survey_points))]
         points_df = pd.DataFrame(st.session_state.survey_points, columns=["lat", "lon"])
-        points_df.index = [f"P{i+1}" for i in range(len(points_df))]
+        points_df.index = labels
         st.dataframe(points_df, width='stretch')
 
         if st.button("Simular Observações de Campo"):
-            lats = points_df["lat"].values
-            lons = points_df["lon"].values
+            lats = [float(p[0]) for p in st.session_state.survey_points]
+            lons = [float(p[1]) for p in st.session_state.survey_points]
+
+            # Build known points dict in UTM
+            import utm
+            known_dict = {}
+            for lbl, lat, lon in zip(labels, lats, lons):
+                e, n_val, _, _ = utm.from_latlon(lat, lon)
+                known_dict[lbl] = (float(e), float(n_val), 100.0)
+            st.session_state.known_points_dict = known_dict
+
             if survey_category == "Poligonação":
-                st.session_state.survey_data = simulator.simulate_traverse_observations(lats, lons)
+                st.session_state.survey_data = simulator.simulate_traverse_observations(lats, lons, labels=labels, survey_type=survey_type)
             else:
                 obs, elevs = simulator.simulate_leveling(len(lats), type=survey_type, method=method if survey_type == "Geométrico" else "trigonométrico")
                 st.session_state.survey_data = obs
@@ -139,10 +169,9 @@ if st.session_state.survey_data is not None:
     if survey_category == "Poligonação":
         st.subheader("🌐 Resultados da Poligonação")
 
-        start_p = st.session_state.survey_points[0]
         pre, raw_coords, errors, adj_coords = simulator.process_traverse_data(
             st.session_state.survey_data,
-            (start_p[0], start_p[1], 100.0),
+            st.session_state.known_points_dict,
             survey_type=survey_type
         )
 
