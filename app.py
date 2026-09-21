@@ -114,21 +114,19 @@ with col_map:
         for i, (lat, lon) in enumerate(points):
             lbl = labels[i]
             color = "red" if "HV" in lbl else "blue"
+            
+            # Popup mantido (clicável), Tooltip removido (evita erro JSON)
             folium.CircleMarker(
                 [lat, lon], radius=6, color=color, fill=True,
-                popup=f"Ponto {lbl}", tooltip=f"Ponto {lbl}"
+                popup=f"Ponto {lbl}"
             ).add_to(m)
 
     st.info("Clique no mapa para adicionar vértices manualmente.")
 
-    # st_folium completo de volta, sem o erro da biblioteca nova
     map_data = st_folium(
         m,
         width=700,
         height=500,
-        center=st.session_state.map_center,
-        zoom=st.session_state.map_zoom,
-        returned_objects=["last_clicked", "center", "zoom"],
         key="survey_map"
     )
 
