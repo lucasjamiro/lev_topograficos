@@ -100,10 +100,12 @@ col_map, col_data = st.columns([1.2, 0.8])
 with col_map:
     st.subheader("Mapa Interativo")
 
-    m = folium.Map(
-        location=[float(st.session_state.map_center[0]), float(st.session_state.map_center[1])],
-        zoom_start=int(st.session_state.map_zoom)
-    )
+    # Utilizamos as coordenadas guardadas em sessão
+    c_lat = float(st.session_state.map_center[0])
+    c_lon = float(st.session_state.map_center[1])
+    c_zoom = int(st.session_state.map_zoom)
+
+    m = folium.Map(location=[c_lat, c_lon], zoom_start=c_zoom)
 
     if st.session_state.survey_points:
         points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
@@ -115,34 +117,16 @@ with col_map:
             lbl = labels[i]
             color = "red" if "HV" in lbl else "blue"
             
-            # Popup mantido (clicável), Tooltip removido (evita erro JSON)
+            # Marcadores e popups originais mantidos
             folium.CircleMarker(
                 [lat, lon], radius=6, color=color, fill=True,
                 popup=f"Ponto {lbl}"
             ).add_to(m)
 
-    st.info("Clique no mapa para adicionar vértices manualmente.")
+    st.warning("A adição manual de vértices por clique no mapa está temporariamente suspensa por limitações técnicas do navegador. Utilize a geração automática.")
 
-    map_data = st_folium(
-        m,
-        width=700,
-        height=500,
-        key="survey_map"
-    )
-
-    if map_data:
-        if map_data.get("center"):
-            st.session_state.map_center = [float(map_data["center"]["lat"]), float(map_data["center"]["lng"])]
-        if map_data.get("zoom"):
-            st.session_state.map_zoom = int(map_data["zoom"])
-
-        if map_data.get("last_clicked"):
-            clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
-            if clicked_coords not in st.session_state.survey_points:
-                st.session_state.survey_points.append(clicked_coords)
-                next_idx = len(st.session_state.survey_points)
-                st.session_state.point_labels.append(f"P{next_idx}")
-                st.rerun()
+    # Renderização estática à prova de falhas JSON (substitui o st_folium)
+    st.components.v1.html(m._repr_html_(), height=500)
 
     if st.button("Limpar Pontos"):
         reset_survey()
