@@ -100,7 +100,11 @@ col_map, col_data = st.columns([1.2, 0.8])
 with col_map:
     st.subheader("Mapa Interativo")
 
-    m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+    # Instancia o mapa garantindo valores float/int no session_state
+    m = folium.Map(
+        location=[float(st.session_state.map_center[0]), float(st.session_state.map_center[1])],
+        zoom_start=int(st.session_state.map_zoom)
+    )
 
     if st.session_state.survey_points:
         points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
@@ -115,12 +119,13 @@ with col_map:
             ).add_to(m)
 
     st.info("Clique no mapa para adicionar vértices manualmente.")
+    
+    # st_folium sem argumentos inválidos
     map_data = st_folium(
         m,
         width=700,
         height=500,
-        center=st.session_state.map_center,
-        zoom=st.session_state.map_zoom,
+        key="survey_map",
         returned_objects=["last_clicked", "center", "zoom"]
     )
 
