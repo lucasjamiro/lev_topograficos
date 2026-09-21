@@ -129,9 +129,9 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
             "Estação": get_label(s_idx),
             "Ré": get_label(re_idx),
             "Vante": get_label(v_idx),
-            "Dir. Ré (°)": round(dir_re, 4),
-            "Dir. Vante (°)": round(dir_vante, 4),
-            "Ângulo Zenital (°)": round(zenith_measured, 4),
+            "Dir. Ré (°)": round(dir_re, 8),
+            "Dir. Vante (°)": round(dir_vante, 8),
+            "Ângulo Zenital (°)": round(zenith_measured, 8),
             "Dist. Inclinada (m)": round(d_inc_measured, 3)
         })
 
@@ -142,7 +142,7 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     Strict calculation workflow for Linked and Closed traverses.
     """
     pre = df.copy()
-    pre["Ângulo Horiz. (°)"] = (pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360
+    pre["Ângulo Horiz. (°)"] = ((pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360).round(8)
     pre["Dist. Horizontal (m)"] = pre["Dist. Inclinada (m)"] * np.sin(np.radians(pre["Ângulo Zenital (°)"]))
     pre["ΔH (m)"] = pre["Dist. Inclinada (m)"] * np.cos(np.radians(pre["Ângulo Zenital (°)"]))
 
@@ -187,6 +187,19 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     for i in range(1, n_setups):
         curr_az = (curr_az + 180 + pre.iloc[i]["Ângulo Horiz. (°)"] + corr_ang_per_station) % 360
         adj_azimuths.append(curr_az)
+
+    # 3b. Transported Azimuths DataFrame
+    az_data = []
+    for i in range(n_setups):
+        az_data.append({
+            "Estação": pre.iloc[i]["Estação"],
+            "Ré": pre.iloc[i]["Ré"],
+            "Vante": pre.iloc[i]["Vante"],
+            "Azimute Transportado (°)": round(float(propagated_azimuths[i]), 8),
+            "Correção (°)": round(float((i + 1) * corr_ang_per_station), 8),
+            "Azimute Corrigido (°)": round(float(adj_azimuths[i]), 8)
+        })
+    az_df = pd.DataFrame(az_data)
 
     # 4. Provisional Coordinates
     # Sequence starts at HV2
@@ -278,7 +291,7 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     raw_df = pd.DataFrame(raw_coords)
     for col in ["E", "N", "Z"]: raw_df[col] = raw_df[col].round(3)
 
-    return pre, raw_df, errors, pd.DataFrame(adj_coords)
+    return pre, az_df, raw_df, errors, pd.DataFrame(adj_coords)
 
 def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start_elev=100.0, error_per_km=0.005):
     """
@@ -319,7 +332,7 @@ def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start
                 "De": f"P{i}",
                 "Para": f"P{i+1}",
                 "Dist. Inclinada (m)": round(slope_dist, 3),
-                "Ângulo Vertical (deg)": round(vert_angle, 4),
+                "Ângulo Vertical (deg)": round(vert_angle, 8),
                 "Alt. Instrumento (m)": 1.500,
                 "Alt. Sinal (m)": 1.500
             })
