@@ -64,10 +64,13 @@ class TestTraverseSimulation(unittest.TestCase):
         end_coords_start = (500, 0, 100.0)
         end_coords_end = (600, 0, 100.0)
 
-        pre, raw_df, errors, adj_df = simulator.process_traverse_data(
+        pre, az_df, raw_df, errors, adj_df = simulator.process_traverse_data(
             obs, start_coords, hv2_coords, survey_type="Linked",
             end_coords_start=end_coords_start, end_coords_end=end_coords_end
         )
+
+        az_cols = ['Estação', 'Ré', 'Vante', 'Azimute Transportado (°)', 'Correção (°)', 'Azimute Corrigido (°)']
+        self.assertTrue(all(col in az_df.columns for col in az_cols))
 
         expected_cols = ['Ponto', 'Correção E', 'Correção N', 'Correção Z', 'E', 'N', 'Z']
         self.assertTrue(all(col in adj_df.columns for col in expected_cols))

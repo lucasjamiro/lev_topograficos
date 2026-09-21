@@ -28,7 +28,7 @@ def test_linked_traverse_math():
     end_coords_start = (500, 0, 100.0)
     end_coords_end = (600, 0, 100.0)
 
-    pre, raw, errors, adj = simulator.process_traverse_data(
+    pre, az_df, raw, errors, adj = simulator.process_traverse_data(
         obs, start_coords, hv2_coords, survey_type="Linked",
         end_coords_start=end_coords_start, end_coords_end=end_coords_end
     )
@@ -64,7 +64,7 @@ def test_closed_traverse_math():
     start_coords = (0, 0, 100.0)
     hv2_coords = (100, 0, 100.0)
 
-    pre, raw, errors, adj = simulator.process_traverse_data(
+    pre, az_df, raw, errors, adj = simulator.process_traverse_data(
         obs, start_coords, hv2_coords, survey_type="Closed"
     )
 

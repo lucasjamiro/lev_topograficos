@@ -165,13 +165,21 @@ with col_map:
             if i < len(labels):
                 folium.CircleMarker([lat, lon], radius=6, color=colors[i], fill=True, popup=labels[i]).add_to(m)
 
-    map_data = st_folium(m, width=None, height=500, returned_objects=["last_clicked", "center", "zoom"], use_container_width=True)
+    map_data = st_folium(
+        m,
+        center=st.session_state.map_center_coord,
+        zoom=st.session_state.map_zoom,
+        width=None,
+        height=500,
+        returned_objects=["last_clicked", "center", "zoom"],
+        use_container_width=True
+    )
 
     if map_data:
         if map_data.get("center"):
-            st.session_state.map_center_coord = [map_data["center"]["lat"], map_data["center"]["lng"]]
+            st.session_state.map_center_coord = [float(map_data["center"]["lat"]), float(map_data["center"]["lng"])]
         if map_data.get("zoom"):
-            st.session_state.map_zoom = map_data["zoom"]
+            st.session_state.map_zoom = int(map_data["zoom"])
         if map_data.get("last_clicked"):
             clicked = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
             if clicked not in st.session_state.survey_points and len(st.session_state.survey_points) < max_pts:
@@ -226,21 +234,24 @@ if st.session_state.survey_data is not None:
         end_cs = (e_hv_end1, n_hv_end1, 100.0) if e_hv_end1 else None
         end_ce = (e_hv_end2, n_hv_end2, 100.0) if e_hv_end2 else None
 
-        pre, raw, errs, adj = simulator.process_traverse_data(
+        pre, az_df, raw, errs, adj = simulator.process_traverse_data(
             st.session_state.survey_data, (e1, n1, 100.0), (e_hv2, n_hv2, 100.0),
             survey_type="Closed" if survey_type == "Fechada" else "Linked",
             end_coords_start=end_cs, end_coords_end=end_ce
         )
 
-        t1, t2, t3, t4, t5 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
+        t1, t2, t3, t4, t5, t6 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "🧭 Azimutes Transportados", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
         with t1: st.dataframe(st.session_state.survey_data, use_container_width=True)
         with t2:
             if challenge_mode: st.info("Modo Desafio Ativo.")
             else: st.dataframe(pre, use_container_width=True)
         with t3:
             if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(raw, use_container_width=True)
+            else: st.dataframe(az_df, use_container_width=True)
         with t4:
+            if challenge_mode: st.info("Modo Desafio Ativo.")
+            else: st.dataframe(raw, use_container_width=True)
+        with t5:
             if challenge_mode:
                 uea = st.number_input("Erro Angular (°)", format="%.5f")
                 uep = st.number_input("Erro Planimétrico (m)", format="%.3f")
@@ -253,7 +264,7 @@ if st.session_state.survey_data is not None:
                 c1.metric("Erro Angular", f"{errs['Erro Angular (°)']:.5f}°")
                 c2.metric("Erro Planimétrico", f"{errs['Erro Planimétrico (m)']:.3f} m")
                 c3.metric("Precisão", errs['Precisão Relativa'])
-        with t5:
+        with t6:
             if challenge_mode:
                 last_label = adj.iloc[-1]['Ponto']
                 uef = st.number_input(f"Este Final ({last_label})", format="%.3f")
