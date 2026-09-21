@@ -24,7 +24,7 @@ def get_traverse_labels(n_points, survey_type="Closed"):
         n_p = max(0, n_points - 2)
         return ["HV1", "HV2"] + [f"P{i+1}" for i in range(n_p)]
 
-def generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=-23.5505, start_lon=-46.6333, scale=0.001, end_coords=None):
+def generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=-25.448369, start_lon=-49.230955, scale=0.001, end_coords=None):
     """
     Generates UTM-based coordinates for traverse points and returns (lats, lons, labels).
     """
