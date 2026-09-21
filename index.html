@@ -10,22 +10,22 @@
   <body>
     <div id="root"></div>
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.50.0/build/stlite.js"></script>
-    <script>
-      stlite.mount(
-        {
-          requirements: ["streamlit", "folium", "streamlit-folium", "pandas", "numpy", "utm"],
-          entrypoint: "app.py",
-          files: {
-            "app.py": {
-              url: "./app.py?v=7.0"
-            },
-            "simulator.py": {
-              url: "./simulator.py?v=7.0"
+  <script>
+        stlite.mount(
+          {
+            requirements: ["streamlit", "folium", "streamlit-folium==0.19.2", "pandas", "numpy", "utm"],
+            entrypoint: "app.py",
+            files: {
+              "app.py": {
+                url: "./app.py?v=8.0"
+              },
+              "simulator.py": {
+                url: "./simulator.py?v=8.0"
+              }
             }
-          }
-        },
-        document.getElementById("root")
-      );
+          },
+          document.getElementById("root")
+        );
     </script>
   </body>
 </html>
