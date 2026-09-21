@@ -1,38 +1,36 @@
-<!doctype html>
-<html lang="pt-BR">
+<!DOCTYPE html>
+<html>
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>Simulador Topográfico Interativo</title>
+    <meta
+      name="viewport"
+      width="device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <title>Simulador Topográfico - Stlite</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@stlite/browser@0.85.1/build/stlite.css"
+      href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.css"
     />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module">
-      import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@0.85.1/build/stlite.js";
-
-      mount(
+    <div id="stlite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.js"></script>
+    <script>
+      stlite.mount(
         {
-          // Aqui o requirements.txt do repositório NÃO é lido:
-          // tudo que o app precisa deve estar listado nesta lista.
-          requirements: [
-            "folium",
-            "streamlit-folium",
-            "utm",
-            "pandas",
-            "numpy",
-          ],
+          requirements: ["folium", "streamlit-folium", "numpy", "pandas", "utm", "branca"],
           entrypoint: "app.py",
           files: {
-            "app.py": { url: "./app.py" },
-            "simulator.py": { url: "./simulator.py" },
+            "app.py": {
+              url: "app.py",
+            },
+            "simulator.py": {
+              url: "simulator.py",
+            },
           },
         },
-        document.getElementById("root"),
+        document.getElementById("stlite")
       );
     </script>
   </body>
