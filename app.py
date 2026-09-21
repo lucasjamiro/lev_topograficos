@@ -47,10 +47,12 @@ if survey_category == "Poligonação":
 
     st.sidebar.subheader("1.1.2 Coordenadas Conhecidas")
     if survey_type == "Fechada":
-        st.sidebar.info("Poligonal fechada precisa de um par de pontos conhecidos (P1).")
-        p1_lat = st.sidebar.number_input("P1 Latitude", value=-23.5505, format="%.6f")
-        p1_lon = st.sidebar.number_input("P1 Longitude", value=-46.6333, format="%.6f")
-        known_points = [(p1_lat, p1_lon)]
+        st.sidebar.info("Poligonal fechada precisa de um par de pontos conhecidos (HV1 e HV2).")
+        hv1_lat = st.sidebar.number_input("HV1 Latitude", value=-23.5510, format="%.6f")
+        hv1_lon = st.sidebar.number_input("HV1 Longitude", value=-46.6338, format="%.6f")
+        hv2_lat = st.sidebar.number_input("HV2 Latitude", value=-23.5505, format="%.6f")
+        hv2_lon = st.sidebar.number_input("HV2 Longitude", value=-46.6333, format="%.6f")
+        known_points = [(hv1_lat, hv1_lon), (hv2_lat, hv2_lon)]
     else:
         st.sidebar.info("Poligonal enquadrada precisa de pontos no início (P1) e no fim (Pn).")
         p1_lat = st.sidebar.number_input("P1 Latitude", value=-23.5505, format="%.6f")
@@ -63,6 +65,8 @@ if survey_category == "Poligonação":
         if "survey_map" in st.session_state and st.session_state["survey_map"].get("center"):
             c_lat = st.session_state["survey_map"]["center"]["lat"]
             c_lon = st.session_state["survey_map"]["center"]["lng"]
+        elif survey_type == "Fechada":
+            c_lat, c_lon = hv2_lat, hv2_lon
         else:
             c_lat, c_lon = p1_lat, p1_lon
 
@@ -72,8 +76,6 @@ if survey_category == "Poligonação":
             lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=c_lat, start_lon=c_lon, end_coords=(pn_lat, pn_lon))
         st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
         st.session_state.point_labels = list(labels)
-        if st.session_state.survey_points:
-            st.session_state.map_center = [float(st.session_state.survey_points[0][0]), float(st.session_state.survey_points[0][1])]
 
 else: # Nivelamento
     survey_type = st.sidebar.radio("1.2 Tipo de Nivelamento", ["Geométrico", "Trigonométrico"], on_change=reset_survey)
@@ -90,8 +92,6 @@ else: # Nivelamento
         lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=start_lat, start_lon=start_lon)
         st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
         st.session_state.point_labels = [f"P{i+1}" for i in range(len(lats))]
-        if st.session_state.survey_points:
-            st.session_state.map_center = [float(st.session_state.survey_points[0][0]), float(st.session_state.survey_points[0][1])]
 
 # --- Main Layout ---
 
@@ -115,7 +115,14 @@ with col_map:
             ).add_to(m)
 
     st.info("Clique no mapa para adicionar vértices manualmente.")
-    map_data = st_folium(m, width=700, height=500, returned_objects=["last_clicked", "center", "zoom"])
+    map_data = st_folium(
+        m,
+        width=700,
+        height=500,
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
+        returned_objects=["last_clicked", "center", "zoom"]
+    )
 
     if map_data:
         if map_data.get("center"):
@@ -169,15 +176,16 @@ if st.session_state.survey_data is not None:
     if survey_category == "Poligonação":
         st.subheader("🌐 Resultados da Poligonação")
 
-        pre, raw_coords, errors, adj_coords = simulator.process_traverse_data(
+        pre, azimuths_df, raw_coords, errors, adj_coords = simulator.process_traverse_data(
             st.session_state.survey_data,
             st.session_state.known_points_dict,
             survey_type=survey_type
         )
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📋 Dados de Campo",
             "⚙️ Dados Pré-calculados",
+            "🧭 Azimutes Transportados",
             "📍 Coordenadas Iniciais",
             "📊 Análise de Erros",
             "✅ Coordenadas Finais (Bowditch)"
@@ -192,10 +200,14 @@ if st.session_state.survey_data is not None:
             st.dataframe(pre, width='stretch')
 
         with tab3:
+            st.write("**Transporte e correção passo a passo dos azimutes.**")
+            st.dataframe(azimuths_df, width='stretch')
+
+        with tab4:
             st.write("**Coordenadas (X, Y, Z) calculadas sem correções.**")
             st.dataframe(raw_coords, width='stretch')
 
-        with tab4:
+        with tab5:
             st.write("**Erros de fechamento e precisão relativa.**")
             c1, c2, c3 = st.columns(3)
             c1.metric("Erro Angular", f"{errors['Erro Angular (°)']:.5f}°")
@@ -203,7 +215,7 @@ if st.session_state.survey_data is not None:
             c3.metric("Precisão Relativa", errors['Precisão Relativa'])
             st.metric("Erro Altimétrico", f"{errors['Erro Altimétrico (m)']:.3f} m")
 
-        with tab5:
+        with tab6:
             st.write("**Coordenadas finais ajustadas pelo método de Bowditch.**")
             st.dataframe(adj_coords, width='stretch')
 
