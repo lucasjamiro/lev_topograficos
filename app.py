@@ -97,34 +97,56 @@ else: # Nivelamento
 
 col_map, col_data = st.columns([1.2, 0.8])
 
-with col_data:
-    st.subheader("Dados dos Vértices")
+with col_map:
+    st.subheader("Mapa Interativo")
+
+    m = folium.Map(
+        location=[float(st.session_state.map_center[0]), float(st.session_state.map_center[1])],
+        zoom_start=int(st.session_state.map_zoom)
+    )
+
     if st.session_state.survey_points:
-        labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(st.session_state.survey_points) else [f"P{i+1}" for i in range(len(st.session_state.survey_points))]
-        points_df = pd.DataFrame(st.session_state.survey_points, columns=["lat", "lon"])
-        points_df.index = labels
+        points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
+        labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(points) else [f"P{i+1}" for i in range(len(points))]
         
-        # CORREÇÃO: use_container_width=True em vez de width='stretch'
-        st.dataframe(points_df, use_container_width=True)
+        folium.PolyLine(points, color="blue", weight=2.5, opacity=0.8).add_to(m)
+        
+        for i, (lat, lon) in enumerate(points):
+            lbl = labels[i]
+            color = "red" if "HV" in lbl else "blue"
+            folium.CircleMarker(
+                [lat, lon], radius=6, color=color, fill=True,
+                popup=f"Ponto {lbl}", tooltip=f"Ponto {lbl}"
+            ).add_to(m)
 
-        if st.button("Simular Observações de Campo"):
-            lats = [float(p[0]) for p in st.session_state.survey_points]
-            lons = [float(p[1]) for p in st.session_state.survey_points]
+    st.info("Clique no mapa para adicionar vértices manualmente.")
 
-            import utm
-            known_dict = {}
-            for lbl, lat, lon in zip(labels, lats, lons):
-                e, n_val, _, _ = utm.from_latlon(lat, lon)
-                known_dict[lbl] = (float(e), float(n_val), 100.0)
-            st.session_state.known_points_dict = known_dict
+    # O st_folium volta a ser o renderizador oficial
+    map_data = st_folium(
+        m,
+        width=700,
+        height=500,
+        returned_objects=["last_clicked", "center", "zoom"],
+        key="survey_map"
+    )
 
-            if survey_category == "Poligonação":
-                st.session_state.survey_data = simulator.simulate_traverse_observations(lats, lons, labels=labels, survey_type=survey_type)
-            else:
-                obs, elevs = simulator.simulate_leveling(len(lats), type=survey_type, method=method if survey_type == "Geométrico" else "trigonométrico")
-                st.session_state.survey_data = obs
-                st.session_state.true_elevations = elevs
-            st.rerun()
+    if map_data:
+        if map_data.get("center"):
+            st.session_state.map_center = [float(map_data["center"]["lat"]), float(map_data["center"]["lng"])]
+        if map_data.get("zoom"):
+            st.session_state.map_zoom = int(map_data["zoom"])
+
+        if map_data.get("last_clicked"):
+            clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
+            if clicked_coords not in st.session_state.survey_points:
+                st.session_state.survey_points.append(clicked_coords)
+                next_idx = len(st.session_state.survey_points)
+                st.session_state.point_labels.append(f"P{next_idx}")
+                st.rerun()
+
+    if st.button("Limpar Pontos"):
+        reset_survey()
+        st.rerun()
 
 # --- Modules Output ---
 if st.session_state.survey_data is not None:
