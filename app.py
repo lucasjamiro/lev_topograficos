@@ -19,7 +19,7 @@ if 'known_points_dict' not in st.session_state:
 if 'user_results' not in st.session_state:
     st.session_state.user_results = {}
 if 'map_center' not in st.session_state:
-    st.session_state.map_center = [-23.5505, -46.6333]
+    st.session_state.map_center = [-25.448369, -49.230955]
 if 'map_zoom' not in st.session_state:
     st.session_state.map_zoom = 16
 
@@ -48,15 +48,15 @@ if survey_category == "Poligonação":
     st.sidebar.subheader("1.1.2 Coordenadas Conhecidas")
     if survey_type == "Fechada":
         st.sidebar.info("Poligonal fechada precisa de um par de pontos conhecidos (P1).")
-        p1_lat = st.sidebar.number_input("P1 Latitude", value=-23.5505, format="%.6f")
-        p1_lon = st.sidebar.number_input("P1 Longitude", value=-46.6333, format="%.6f")
+        p1_lat = st.sidebar.number_input("P1 Latitude", value=-25.448369, format="%.6f")
+        p1_lon = st.sidebar.number_input("P1 Longitude", value=-49.230955, format="%.6f")
         known_points = [(p1_lat, p1_lon)]
     else:
         st.sidebar.info("Poligonal enquadrada precisa de pontos no início (P1) e no fim (Pn).")
-        p1_lat = st.sidebar.number_input("P1 Latitude", value=-23.5505, format="%.6f")
-        p1_lon = st.sidebar.number_input("P1 Longitude", value=-46.6333, format="%.6f")
-        pn_lat = st.sidebar.number_input("Pn Latitude", value=-23.5555, format="%.6f")
-        pn_lon = st.sidebar.number_input("Pn Longitude", value=-46.6383, format="%.6f")
+        p1_lat = st.sidebar.number_input("P1 Latitude", value=-25.448369, format="%.6f")
+        p1_lon = st.sidebar.number_input("P1 Longitude", value=-49.230955, format="%.6f")
+        pn_lat = st.sidebar.number_input("Pn Latitude", value=-25.452000, format="%.6f")
+        pn_lon = st.sidebar.number_input("Pn Longitude", value=-49.225000, format="%.6f")
         known_points = [(p1_lat, p1_lon), (pn_lat, pn_lon)]
 
     if st.sidebar.button("Gerar Coordenadas Aleatórias"):
@@ -83,8 +83,8 @@ else: # Nivelamento
         method = "trigonométrico"
 
     n_points = st.sidebar.number_input("Número de Pontos", min_value=2, max_value=50, value=5)
-    start_lat = st.sidebar.number_input("Latitude Inicial", value=-23.5505, format="%.6f")
-    start_lon = st.sidebar.number_input("Longitude Inicial", value=-46.6333, format="%.6f")
+    start_lat = st.sidebar.number_input("Latitude Inicial", value=-25.448369, format="%.6f")
+    start_lon = st.sidebar.number_input("Longitude Inicial", value=-49.230955, format="%.6f")
 
     if st.sidebar.button("Gerar Trajeto de Nivelamento"):
         lats, lons, labels = simulator.generate_traverse_coordinates(n_points, survey_type="Linked", start_lat=start_lat, start_lon=start_lon)
@@ -209,6 +209,9 @@ if st.session_state.survey_data is not None:
 
     else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
+        st.write("**Caderneta de Campo do Nivelamento**")
+        st.dataframe(st.session_state.survey_data, width='stretch')
+
         if survey_type == "Geométrico":
             st.header("🔍 Módulo de Leitura de Réguas")
             selected_row = st.selectbox("Selecione a Estação para leitura", range(len(st.session_state.survey_data)))

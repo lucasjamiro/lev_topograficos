@@ -1,13 +1,21 @@
 import numpy as np
 import pandas as pd
 
-def calculate_azimuth(lat1, lon1, lat2, lon2):
-    dlon = lon2 - lon1
-    y = np.sin(np.radians(dlon)) * np.cos(np.radians(lat2))
-    x = np.cos(np.radians(lat1)) * np.sin(np.radians(lat2)) - \
-        np.sin(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.cos(np.radians(dlon))
-    azimuth = np.degrees(np.arctan2(y, x))
-    return (azimuth + 360) % 360
+def calculate_azimuth(x1, y1, x2, y2):
+    """
+    Computes true grid azimuth from point 1 to point 2 using atan2(delta_E, delta_N).
+    Supports either UTM coordinates (E1, N1, E2, N2) or Geographic coordinates (lat1, lon1, lat2, lon2).
+    """
+    if abs(x1) <= 90 and abs(y1) <= 180 and abs(x2) <= 90 and abs(y2) <= 180:
+        e1, n1, _, _ = utm.from_latlon(float(x1), float(y1))
+        e2, n2, _, _ = utm.from_latlon(float(x2), float(y2))
+    else:
+        e1, n1, e2, n2 = float(x1), float(y1), float(x2), float(y2)
+
+    de = e2 - e1
+    dn = n2 - n1
+    azimuth = (np.degrees(np.arctan2(de, dn)) + 360) % 360
+    return float(azimuth)
 
 import utm
 
@@ -24,7 +32,7 @@ def get_traverse_labels(n_points, survey_type="Closed"):
         n_p = max(0, n_points - 2)
         return ["HV1", "HV2"] + [f"P{i+1}" for i in range(n_p)]
 
-def generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=-23.5505, start_lon=-46.6333, scale=0.001, end_coords=None):
+def generate_traverse_coordinates(n_points, survey_type="Closed", start_lat=-25.448369, start_lon=-49.230955, scale=0.001, end_coords=None):
     """
     Generates UTM-based coordinates for traverse points and returns (lats, lons, labels).
     """
@@ -193,12 +201,12 @@ def process_traverse_data(df, known_dict, survey_type="Fechada"):
 
     hv1 = known_dict["HV1"]
     hv2 = known_dict["HV2"]
-    az_start = np.degrees(np.arctan2(hv2[0] - hv1[0], hv2[1] - hv1[1])) % 360
+    az_start = calculate_azimuth(hv1[0], hv1[1], hv2[0], hv2[1])
 
     if is_linked:
         hv4 = known_dict["HV4"]
         hv5 = known_dict["HV5"]
-        az_target = np.degrees(np.arctan2(hv5[0] - hv4[0], hv5[1] - hv4[1])) % 360
+        az_target = calculate_azimuth(hv4[0], hv4[1], hv5[0], hv5[1])
     else:
         angle_0 = pre.iloc[0]["Ângulo Horiz. (°)"]
         az_target = (az_start - 180.0 + angle_0 + 360) % 360
