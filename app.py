@@ -1,15 +1,15 @@
 import streamlit as st
 import folium
+from streamlit_folium import st_folium
 import simulator
 import pandas as pd
 import numpy as np
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Simulador Topográfico Interativo", layout="wide")
 
-# --- Inicialização ---
+# --- Session State Initialization ---
 if 'survey_points' not in st.session_state:
-    st.session_state.survey_points = []
+    st.session_state.survey_points = []  # List of (lat, lon)
 if 'point_labels' not in st.session_state:
     st.session_state.point_labels = []
 if 'survey_data' not in st.session_state:
@@ -32,9 +32,14 @@ def reset_survey():
 
 st.title("🏗️ Simulador de Levantamentos Topográficos")
 
-# --- Barra Lateral ---
+# --- Sidebar ---
 st.sidebar.header("Configurações do Levantamento")
-survey_category = st.sidebar.selectbox("1. Tipo de Levantamento", ["Poligonação", "Nivelamento"], on_change=reset_survey)
+
+survey_category = st.sidebar.selectbox(
+    "1. Tipo de Levantamento",
+    ["Poligonação", "Nivelamento"],
+    on_change=reset_survey
+)
 
 if survey_category == "Poligonação":
     survey_type = st.sidebar.radio("1.1 Tipo de Poligonal", ["Fechada", "Enquadrada"], on_change=reset_survey)
@@ -57,8 +62,10 @@ if survey_category == "Poligonação":
         known_points = [(p1_lat, p1_lon), (pn_lat, pn_lon)]
 
     if st.sidebar.button("Gerar Coordenadas Aleatórias"):
-        c_lat, c_lon = (-23.5505, -46.6333)
-        if survey_type == "Fechada":
+        if "survey_map" in st.session_state and st.session_state["survey_map"].get("center"):
+            c_lat = st.session_state["survey_map"]["center"]["lat"]
+            c_lon = st.session_state["survey_map"]["center"]["lng"]
+        elif survey_type == "Fechada":
             c_lat, c_lon = hv2_lat, hv2_lon
         else:
             c_lat, c_lon = p1_lat, p1_lon
@@ -70,7 +77,7 @@ if survey_category == "Poligonação":
         st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
         st.session_state.point_labels = list(labels)
 
-else:
+else: # Nivelamento
     survey_type = st.sidebar.radio("1.2 Tipo de Nivelamento", ["Geométrico", "Trigonométrico"], on_change=reset_survey)
     if survey_type == "Geométrico":
         method = st.sidebar.selectbox("1.2.1 Técnica", ["visadas iguais", "visadas equivalentes", "visadas recíprocas", "visadas extremas"])
@@ -86,16 +93,14 @@ else:
         st.session_state.survey_points = list(zip([float(x) for x in lats], [float(y) for y in lons]))
         st.session_state.point_labels = [f"P{i+1}" for i in range(len(lats))]
 
-# --- Layout Principal ---
+# --- Main Layout ---
+
 col_map, col_data = st.columns([1.2, 0.8])
 
 with col_map:
     st.subheader("Mapa Interativo")
-    c_lat = float(st.session_state.map_center[0])
-    c_lon = float(st.session_state.map_center[1])
-    c_zoom = int(st.session_state.map_zoom)
 
-    m = folium.Map(location=[c_lat, c_lon], zoom_start=c_zoom)
+    m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
 
     if st.session_state.survey_points:
         points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
@@ -104,10 +109,34 @@ with col_map:
         for i, (lat, lon) in enumerate(points):
             lbl = labels[i]
             color = "red" if "HV" in lbl else "blue"
-            folium.CircleMarker([lat, lon], radius=6, color=color, fill=True, popup=f"Ponto {lbl}").add_to(m)
+            folium.CircleMarker(
+                [lat, lon], radius=6, color=color, fill=True,
+                popup=f"Ponto {lbl}", tooltip=f"Ponto {lbl}"
+            ).add_to(m)
 
-    st.warning("A adição manual de vértices por clique no mapa está temporariamente suspensa devido a falhas do navegador. Utilize a geração automática ao lado.")
-    components.html(m._repr_html_(), height=500)
+    st.info("Clique no mapa para adicionar vértices manualmente.")
+    map_data = st_folium(
+        m,
+        width=700,
+        height=500,
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
+        returned_objects=["last_clicked", "center", "zoom"]
+    )
+
+    if map_data:
+        if map_data.get("center"):
+            st.session_state.map_center = [float(map_data["center"]["lat"]), float(map_data["center"]["lng"])]
+        if map_data.get("zoom"):
+            st.session_state.map_zoom = int(map_data["zoom"])
+
+    if map_data and map_data.get("last_clicked"):
+        clicked_coords = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
+        if clicked_coords not in st.session_state.survey_points:
+            st.session_state.survey_points.append(clicked_coords)
+            next_idx = len(st.session_state.survey_points)
+            st.session_state.point_labels.append(f"P{next_idx}")
+            st.rerun()
 
     if st.button("Limpar Pontos"):
         reset_survey()
@@ -119,12 +148,13 @@ with col_data:
         labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(st.session_state.survey_points) else [f"P{i+1}" for i in range(len(st.session_state.survey_points))]
         points_df = pd.DataFrame(st.session_state.survey_points, columns=["lat", "lon"])
         points_df.index = labels
-        st.dataframe(points_df, use_container_width=True)
+        st.dataframe(points_df, width='stretch')
 
         if st.button("Simular Observações de Campo"):
             lats = [float(p[0]) for p in st.session_state.survey_points]
             lons = [float(p[1]) for p in st.session_state.survey_points]
 
+            # Build known points dict in UTM
             import utm
             known_dict = {}
             for lbl, lat, lon in zip(labels, lats, lons):
@@ -140,31 +170,43 @@ with col_data:
                 st.session_state.true_elevations = elevs
             st.rerun()
 
+# --- Modules Output ---
 if st.session_state.survey_data is not None:
     st.write("---")
     if survey_category == "Poligonação":
         st.subheader("🌐 Resultados da Poligonação")
+
         pre, azimuths_df, raw_coords, errors, adj_coords = simulator.process_traverse_data(
             st.session_state.survey_data,
             st.session_state.known_points_dict,
             survey_type=survey_type
         )
+
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📋 Dados de Campo", "⚙️ Dados Pré-calculados", "🧭 Azimutes Transportados",
-            "📍 Coordenadas Iniciais", "📊 Análise de Erros", "✅ Coordenadas Finais (Bowditch)"
+            "📋 Dados de Campo",
+            "⚙️ Dados Pré-calculados",
+            "🧭 Azimutes Transportados",
+            "📍 Coordenadas Iniciais",
+            "📊 Análise de Erros",
+            "✅ Coordenadas Finais (Bowditch)"
         ])
+
         with tab1:
             st.write("**Direções horizontais, ângulos zenitais e distâncias inclinadas.**")
-            st.dataframe(st.session_state.survey_data, use_container_width=True)
+            st.dataframe(st.session_state.survey_data, width='stretch')
+
         with tab2:
             st.write("**Conversão de direções para ângulos horizontais e distâncias horizontais.**")
-            st.dataframe(pre, use_container_width=True)
+            st.dataframe(pre, width='stretch')
+
         with tab3:
             st.write("**Transporte e correção passo a passo dos azimutes.**")
-            st.dataframe(azimuths_df, use_container_width=True)
+            st.dataframe(azimuths_df, width='stretch')
+
         with tab4:
             st.write("**Coordenadas (X, Y, Z) calculadas sem correções.**")
-            st.dataframe(raw_coords, use_container_width=True)
+            st.dataframe(raw_coords, width='stretch')
+
         with tab5:
             st.write("**Erros de fechamento e precisão relativa.**")
             c1, c2, c3 = st.columns(3)
@@ -172,15 +214,18 @@ if st.session_state.survey_data is not None:
             c2.metric("Erro Planimétrico", f"{errors['Erro Planimétrico (m)']:.3f} m")
             c3.metric("Precisão Relativa", errors['Precisão Relativa'])
             st.metric("Erro Altimétrico", f"{errors['Erro Altimétrico (m)']:.3f} m")
+
         with tab6:
             st.write("**Coordenadas finais ajustadas pelo método de Bowditch.**")
-            st.dataframe(adj_coords, use_container_width=True)
-    else:
+            st.dataframe(adj_coords, width='stretch')
+
+    else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
         if survey_type == "Geométrico":
             st.header("🔍 Módulo de Leitura de Réguas")
             selected_row = st.selectbox("Selecione a Estação para leitura", range(len(st.session_state.survey_data)))
             row = st.session_state.survey_data.iloc[selected_row]
+
             c1, c2 = st.columns(2)
             with c1:
                 st.text(f"Leitura de Ré (Ponto {selected_row+1})")
@@ -207,7 +252,9 @@ if st.session_state.survey_data is not None:
                 "Referência": true_elevs,
                 "Diferença (m)": diffs
             })
-            st.dataframe(comp_df, use_container_width=True)
+            st.dataframe(comp_df, width='stretch')
+
             st.header("📊 Análise de Erros")
+            # For leveling, we compare with the true final elevation
             closure_error = user_elevs[-1] - true_elevs[-1]
             st.metric("Erro de Cálculo (m)", f"{closure_error:.3f} m")
