@@ -163,9 +163,9 @@ def simulate_traverse_observations(lats, lons, labels=None, survey_type="Closed"
             "Estação": labels[st_idx],
             "Ré": labels[bs_idx],
             "Vante": labels[fs_idx],
-            "Dir. Ré (°)": round(float(dir_re), 8),
-            "Dir. Vante (°)": round(float(dir_vante), 8),
-            "Ângulo Zenital (°)": round(float(zenith_measured), 8),
+            "Dir. Ré (°)": round(float(dir_re), 4),
+            "Dir. Vante (°)": round(float(dir_vante), 4),
+            "Ângulo Zenital (°)": round(float(zenith_measured), 4),
             "Dist. Inclinada (m)": round(float(d_inc_measured), 3)
         })
 
@@ -181,7 +181,7 @@ def process_traverse_data(df, known_dict, survey_type="Fechada"):
     5. Horizontal distance and provisional coordinate calculation.
     6. True Linear Closure Error (e_E, e_N, e_Z) at arrival station (HV4 for Linked, HV2 for Closed).
     7. Bowditch adjustment proportional to distance.
-    Returns: pre, azimuths_df, raw_coords, errors, adj_coords with columns: Ponto, Correção E, Correção N, Correção Z, E, N, Z
+    Returns: pre, raw_coords, errors, adj_coords with columns: Ponto, Correção E, Correção N, Correção Z, E, N, Z
     """
     is_linked = survey_type in ["Linked", "Enquadrada"]
 
@@ -220,37 +220,15 @@ def process_traverse_data(df, known_dict, survey_type="Fechada"):
     corr_per_station = -e_A / n_setups
 
     corrected_az = []
-    azimuth_rows = []
     current_az = az_start
-    current_raw_az = az_start
     for i in range(n_setups):
         angle = pre.iloc[i]["Ângulo Horiz. (°)"]
-        raw_az = (current_raw_az + angle - 180.0 + 360) % 360
-        current_raw_az = raw_az
-
-        cum_corr = (i + 1) * corr_per_station
-        corr_az = (raw_az + cum_corr + 360) % 360
-
-        st_label = pre.iloc[i]["Estação"]
-        fs_label = pre.iloc[i]["Vante"]
-        alignment = f"{st_label} -> {fs_label}"
-
-        azimuth_rows.append({
-            "Alinhamento": alignment,
-            "Ângulo Horiz. Medido (°)": round(float(angle), 8),
-            "Azimute Transportado Bruto (°)": round(float(raw_az), 8),
-            "Correção Angular Acumulada (°)": round(float(cum_corr), 8),
-            "Azimute Corrigido (°)": round(float(corr_az), 8)
-        })
-
         if i == 0:
             az_i = (az_start - 180.0 + angle + corr_per_station + 360) % 360
         else:
             az_i = (current_az + angle - 180.0 + corr_per_station + 360) % 360
         corrected_az.append(az_i)
         current_az = az_i
-
-    azimuths_df = pd.DataFrame(azimuth_rows)
 
     # Segment setups for coordinate propagation
     leg_setups = pre.iloc[:n_setups] if is_linked else pre.iloc[:n_setups - 1]
@@ -383,7 +361,7 @@ def process_traverse_data(df, known_dict, survey_type="Fechada"):
             adj_df = pd.concat([adj_df, pd.DataFrame([hv5_row])], ignore_index=True)
 
     cols = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
-    return pre, azimuths_df, raw_df[cols], errors, adj_df[cols]
+    return pre, raw_df[cols], errors, adj_df[cols]
 
 def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start_elev=100.0, error_per_km=0.005):
     """
