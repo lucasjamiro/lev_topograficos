@@ -97,54 +97,20 @@ else: # Nivelamento
 
 col_map, col_data = st.columns([1.2, 0.8])
 
-with col_map:
-    st.subheader("Mapa Interativo")
-
-    # Utilizamos as coordenadas guardadas em sessão
-    c_lat = float(st.session_state.map_center[0])
-    c_lon = float(st.session_state.map_center[1])
-    c_zoom = int(st.session_state.map_zoom)
-
-    m = folium.Map(location=[c_lat, c_lon], zoom_start=c_zoom)
-
-    if st.session_state.survey_points:
-        points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
-        labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(points) else [f"P{i+1}" for i in range(len(points))]
-        
-        folium.PolyLine(points, color="blue", weight=2.5, opacity=0.8).add_to(m)
-        
-        for i, (lat, lon) in enumerate(points):
-            lbl = labels[i]
-            color = "red" if "HV" in lbl else "blue"
-            
-            # Marcadores e popups originais mantidos
-            folium.CircleMarker(
-                [lat, lon], radius=6, color=color, fill=True,
-                popup=f"Ponto {lbl}"
-            ).add_to(m)
-
-    st.warning("A adição manual de vértices por clique no mapa está temporariamente suspensa por limitações técnicas do navegador. Utilize a geração automática.")
-
-    # Renderização estática à prova de falhas JSON (substitui o st_folium)
-    st.components.v1.html(m._repr_html_(), height=500)
-
-    if st.button("Limpar Pontos"):
-        reset_survey()
-        st.rerun()
-
 with col_data:
     st.subheader("Dados dos Vértices")
     if st.session_state.survey_points:
         labels = st.session_state.point_labels if len(st.session_state.point_labels) == len(st.session_state.survey_points) else [f"P{i+1}" for i in range(len(st.session_state.survey_points))]
         points_df = pd.DataFrame(st.session_state.survey_points, columns=["lat", "lon"])
         points_df.index = labels
-        st.dataframe(points_df, width='stretch')
+        
+        # CORREÇÃO: use_container_width=True em vez de width='stretch'
+        st.dataframe(points_df, use_container_width=True)
 
         if st.button("Simular Observações de Campo"):
             lats = [float(p[0]) for p in st.session_state.survey_points]
             lons = [float(p[1]) for p in st.session_state.survey_points]
 
-            # Build known points dict in UTM
             import utm
             known_dict = {}
             for lbl, lat, lon in zip(labels, lats, lons):
@@ -183,19 +149,19 @@ if st.session_state.survey_data is not None:
 
         with tab1:
             st.write("**Direções horizontais, ângulos zenitais e distâncias inclinadas.**")
-            st.dataframe(st.session_state.survey_data, width='stretch')
+            st.dataframe(st.session_state.survey_data, use_container_width=True)
 
         with tab2:
             st.write("**Conversão de direções para ângulos horizontais e distâncias horizontais.**")
-            st.dataframe(pre, width='stretch')
+            st.dataframe(pre, use_container_width=True)
 
         with tab3:
             st.write("**Transporte e correção passo a passo dos azimutes.**")
-            st.dataframe(azimuths_df, width='stretch')
+            st.dataframe(azimuths_df, use_container_width=True)
 
         with tab4:
             st.write("**Coordenadas (X, Y, Z) calculadas sem correções.**")
-            st.dataframe(raw_coords, width='stretch')
+            st.dataframe(raw_coords, use_container_width=True)
 
         with tab5:
             st.write("**Erros de fechamento e precisão relativa.**")
@@ -207,7 +173,7 @@ if st.session_state.survey_data is not None:
 
         with tab6:
             st.write("**Coordenadas finais ajustadas pelo método de Bowditch.**")
-            st.dataframe(adj_coords, width='stretch')
+            st.dataframe(adj_coords, use_container_width=True)
 
     else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
@@ -242,9 +208,8 @@ if st.session_state.survey_data is not None:
                 "Referência": true_elevs,
                 "Diferença (m)": diffs
             })
-            st.dataframe(comp_df, width='stretch')
+            st.dataframe(comp_df, use_container_width=True)
 
             st.header("📊 Análise de Erros")
-            # For leveling, we compare with the true final elevation
             closure_error = user_elevs[-1] - true_elevs[-1]
             st.metric("Erro de Cálculo (m)", f"{closure_error:.3f} m")
