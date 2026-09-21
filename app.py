@@ -100,13 +100,10 @@ col_map, col_data = st.columns([1.2, 0.8])
 with col_map:
     st.subheader("Mapa Interativo")
 
-    # Garante tipos primitivos (float/int) para centralização e zoom
-    c_lat = float(st.session_state.map_center[0])
-    c_lon = float(st.session_state.map_center[1])
-    c_zoom = int(st.session_state.map_zoom)
-
-    # Instancia o mapa
-    m = folium.Map(location=[c_lat, c_lon], zoom_start=c_zoom)
+    m = folium.Map(
+        location=[float(st.session_state.map_center[0]), float(st.session_state.map_center[1])],
+        zoom_start=int(st.session_state.map_zoom)
+    )
 
     if st.session_state.survey_points:
         points = [(float(pt[0]), float(pt[1])) for pt in st.session_state.survey_points]
@@ -117,24 +114,21 @@ with col_map:
         for i, (lat, lon) in enumerate(points):
             lbl = labels[i]
             color = "red" if "HV" in lbl else "blue"
-            
-            # MANTEMOS AS CORES, RAIOS E O POPUP CLICÁVEL!
-            # Apenas removemos o "tooltip=" que causa a falha de serialização JSON.
             folium.CircleMarker(
-                [lat, lon], 
-                radius=6, 
-                color=color, 
-                fill=True,
-                popup=f"Ponto {lbl}" 
+                [lat, lon], radius=6, color=color, fill=True,
+                popup=f"Ponto {lbl}", tooltip=f"Ponto {lbl}"
             ).add_to(m)
 
     st.info("Clique no mapa para adicionar vértices manualmente.")
 
-    # st_folium sem argumentos extras
+    # st_folium completo de volta, sem o erro da biblioteca nova
     map_data = st_folium(
         m,
         width=700,
         height=500,
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
+        returned_objects=["last_clicked", "center", "zoom"],
         key="survey_map"
     )
 
