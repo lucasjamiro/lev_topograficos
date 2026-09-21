@@ -6,6 +6,15 @@ import simulator
 
 class TestTraverseSimulation(unittest.TestCase):
 
+    def test_azimuth_calculation(self):
+        # 45 degree azimuth from (0, 0) to (100, 100) in plane
+        az = simulator.calculate_azimuth(0, 0, 100, 100)
+        self.assertAlmostEqual(az, 45.0, places=4)
+
+        # 135 degree azimuth from (0, 0) to (100, -100)
+        az2 = simulator.calculate_azimuth(0, 0, 100, -100)
+        self.assertAlmostEqual(az2, 135.0, places=4)
+
     def test_linked_traverse_coordinate_generation(self):
         n = 5
         lats, lons, labels = simulator.generate_traverse_coordinates(n, survey_type="Linked")
