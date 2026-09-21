@@ -50,39 +50,57 @@ if survey_category == "Poligonação":
     st.sidebar.subheader("1.1.2 Coordenadas Conhecidas (UTM)")
     u_e, u_n, u_zone, u_letter = 677878.52, 7184223.31, 22, 'J'
 
+    # Initialize session state keys for sidebar inputs if not already present
+    if "e1_input" not in st.session_state:
+        st.session_state.e1_input = u_e
+    if "n1_input" not in st.session_state:
+        st.session_state.n1_input = u_n
+    if "e2_input" not in st.session_state:
+        st.session_state.e2_input = u_e + 50.0
+    if "n2_input" not in st.session_state:
+        st.session_state.n2_input = u_n + 50.0
+    if "e_hv4_input" not in st.session_state:
+        st.session_state.e_hv4_input = u_e + 200.0
+    if "n_hv4_input" not in st.session_state:
+        st.session_state.n_hv4_input = u_n + 200.0
+    if "e_hv5_input" not in st.session_state:
+        st.session_state.e_hv5_input = u_e + 250.0
+    if "n_hv5_input" not in st.session_state:
+        st.session_state.n_hv5_input = u_n + 250.0
+
     # Sync inputs from map clicks
     if len(st.session_state.survey_points) >= 1:
         e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[0])
-        st.session_state.e1_input = round(e, 2)
-        st.session_state.n1_input = round(n, 2)
+        st.session_state.e1_input = round(float(e), 2)
+        st.session_state.n1_input = round(float(n), 2)
     if len(st.session_state.survey_points) >= 2:
         e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[1])
-        st.session_state.e2_input = round(e, 2)
-        st.session_state.n2_input = round(n, 2)
+        st.session_state.e2_input = round(float(e), 2)
+        st.session_state.n2_input = round(float(n), 2)
 
     e_hv_end1, n_hv_end1, e_hv_end2, n_hv_end2 = None, None, None, None
     if survey_type == "Enquadrada":
         if len(st.session_state.survey_points) >= max_pts - 1:
             e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[max_pts-2])
-            st.session_state.e_hv4_input = round(e, 2)
-            st.session_state.n_hv4_input = round(n, 2)
+            st.session_state.e_hv4_input = round(float(e), 2)
+            st.session_state.n_hv4_input = round(float(n), 2)
         if len(st.session_state.survey_points) >= max_pts:
             e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[max_pts-1])
-            st.session_state.e_hv5_input = round(e, 2)
-            st.session_state.n_hv5_input = round(n, 2)
+            st.session_state.e_hv5_input = round(float(e), 2)
+            st.session_state.n_hv5_input = round(float(n), 2)
 
     st.sidebar.write("**Partida:**")
-    e1 = st.sidebar.number_input("HV1 Este (m)", value=u_e, format="%.2f", key="e1_input")
-    n1 = st.sidebar.number_input("HV1 Norte (m)", value=u_n, format="%.2f", key="n1_input")
-    e_hv2 = st.sidebar.number_input("HV2 Este (m)", value=u_e + 50.0, format="%.2f", key="e2_input")
-    n_hv2 = st.sidebar.number_input("HV2 Norte (m)", value=u_n + 50.0, format="%.2f", key="n2_input")
+    e1 = st.sidebar.number_input("HV1 Este (m)", format="%.2f", key="e1_input")
+    n1 = st.sidebar.number_input("HV1 Norte (m)", format="%.2f", key="n1_input")
+    e_hv2 = st.sidebar.number_input("HV2 Este (m)", format="%.2f", key="e2_input")
+    n_hv2 = st.sidebar.number_input("HV2 Norte (m)", format="%.2f", key="n2_input")
 
     if survey_type == "Enquadrada":
         st.sidebar.write("**Chegada:**")
-        e_hv_end1 = st.sidebar.number_input("HV4 Este (m)", value=u_e + 200.0, format="%.2f", key="e_hv4_input")
-        n_hv_end1 = st.sidebar.number_input("HV4 Norte (m)", value=u_n + 200.0, format="%.2f", key="n_hv4_input")
-        e_hv_end2 = st.sidebar.number_input("HV5 Este (m)", value=u_e + 250.0, format="%.2f", key="e_hv5_input")
-        n_hv_end2 = st.sidebar.number_input("HV5 Norte (m)", value=u_n + 250.0, format="%.2f", key="n_hv5_input")
+        e_hv_end1 = st.sidebar.number_input("HV4 Este (m)", format="%.2f", key="e_hv4_input")
+        n_hv_end1 = st.sidebar.number_input("HV4 Norte (m)", format="%.2f", key="n_hv4_input")
+        e_hv_end2 = st.sidebar.number_input("HV5 Este (m)", format="%.2f", key="e_hv5_input")
+        n_hv_end2 = st.sidebar.number_input("HV5 Norte (m)", format="%.2f", key="n_hv5_input")
 
     utm_zone = st.sidebar.number_input("Zona UTM", value=u_zone, min_value=1, max_value=60)
     utm_letter = st.sidebar.text_input("Letra UTM", value=u_letter).upper()
@@ -91,16 +109,17 @@ if survey_category == "Poligonação":
     if col_b1.button("Plotar Bases"):
         l1 = utm.to_latlon(e1, n1, utm_zone, utm_letter)
         l2 = utm.to_latlon(e_hv2, n_hv2, utm_zone, utm_letter)
-        points = [l1, l2]
+        points = [(float(l1[0]), float(l1[1])), (float(l2[0]), float(l2[1]))]
         if survey_type == "Enquadrada":
             l4 = utm.to_latlon(e_hv_end1, n_hv_end1, utm_zone, utm_letter)
             l5 = utm.to_latlon(e_hv_end2, n_hv_end2, utm_zone, utm_letter)
             # Add placeholders for intermediate points if not enough
             while len(points) < max_pts - 2:
-                points.append((l1[0], l1[1]))
-            points.append(l4)
-            points.append(l5)
+                points.append((float(l1[0]), float(l1[1])))
+            points.append((float(l4[0]), float(l4[1])))
+            points.append((float(l5[0]), float(l5[1])))
         st.session_state.survey_points = points
+        st.session_state.map_center_coord = [float(l1[0]), float(l1[1])]
         st.rerun()
 
     if col_b2.button("Aleatório"):
@@ -122,8 +141,9 @@ else: # Nivelamento
     utm_zone, utm_letter = 22, 'J'
 
     if st.sidebar.button("Gerar Trajeto"):
-        lats, lons = simulator.generate_traverse_coordinates(n_pts_level-2, survey_type="Closed", start_lat=-25.4484, start_lon=-49.2310)
-        st.session_state.survey_points = list(zip(lats, lons))
+        start_lat, start_lon = st.session_state.map_center_coord
+        lats, lons = simulator.generate_traverse_coordinates(n_pts_level-2, survey_type="Closed", start_lat=start_lat, start_lon=start_lon)
+        st.session_state.survey_points = [(float(la), float(lo)) for la, lo in zip(lats, lons)]
         st.rerun()
 
 # --- Labels Generation ---
@@ -176,15 +196,16 @@ with col_map:
     )
 
     if map_data:
-        if map_data.get("center"):
-            c = map_data["center"]
-            if isinstance(c, dict) and "lat" in c and "lng" in c:
-                st.session_state.map_center_coord = [float(c["lat"]), float(c["lng"])]
-            elif isinstance(c, (list, tuple)) and len(c) >= 2:
-                st.session_state.map_center_coord = [float(c[0]), float(c[1])]
+        new_center = map_data.get("center")
+        if new_center:
+            if isinstance(new_center, dict) and "lat" in new_center and "lng" in new_center:
+                st.session_state.map_center_coord = [float(new_center["lat"]), float(new_center["lng"])]
+            elif isinstance(new_center, (list, tuple)) and len(new_center) >= 2:
+                st.session_state.map_center_coord = [float(new_center[0]), float(new_center[1])]
 
-        if map_data.get("zoom"):
-            st.session_state.map_zoom = int(map_data["zoom"])
+        new_zoom = map_data.get("zoom")
+        if new_zoom:
+            st.session_state.map_zoom = int(new_zoom)
 
         if map_data.get("last_clicked"):
             clicked = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
