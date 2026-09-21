@@ -171,11 +171,21 @@ with col_map:
         zoom=st.session_state.map_zoom,
         width=None,
         height=500,
-        returned_objects=["last_clicked"],
+        returned_objects=["last_clicked", "center", "zoom"],
         use_container_width=True
     )
 
     if map_data:
+        if map_data.get("center"):
+            c = map_data["center"]
+            if isinstance(c, dict) and "lat" in c and "lng" in c:
+                st.session_state.map_center_coord = [float(c["lat"]), float(c["lng"])]
+            elif isinstance(c, (list, tuple)) and len(c) >= 2:
+                st.session_state.map_center_coord = [float(c[0]), float(c[1])]
+
+        if map_data.get("zoom"):
+            st.session_state.map_zoom = int(map_data["zoom"])
+
         if map_data.get("last_clicked"):
             clicked = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
             if clicked not in st.session_state.survey_points and len(st.session_state.survey_points) < max_pts:
