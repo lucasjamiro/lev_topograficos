@@ -88,5 +88,52 @@ class TestTraverseSimulation(unittest.TestCase):
         obs, elevs = simulator.simulate_leveling(4, type="Geometric")
         self.assertIn('AI (m)', obs.columns)
 
+    def test_radiation_simulation_and_processing(self):
+        e_coords = np.array([0, 100, 100, 0, 0], dtype=float)
+        n_coords = np.array([0, 0, 100, 100, 0], dtype=float)
+
+        radiation_data = [
+            {
+                "name": "IRR1",
+                "station": "P1",
+                "re": "HV2",
+                "e": 150.0,
+                "n": 50.0,
+                "Z": 100.0
+            },
+            {
+                "name": "IRR2",
+                "station": "HV2",
+                "re": "HV1",
+                "e": 120.0,
+                "n": -20.0,
+                "Z": 100.0
+            }
+        ]
+
+        obs = simulator.simulate_traverse_observations(
+            e_coords, n_coords, survey_type="Closed",
+            angle_sigma=0.0001, dist_sigma=0.001,
+            radiation_data=radiation_data
+        )
+
+        vante_list = obs["Vante"].tolist()
+        self.assertIn("IRR1", vante_list)
+        self.assertIn("IRR2", vante_list)
+
+        start_coords = (0, 0, 100.0)
+        hv2_coords = (100, 0, 100.0)
+        pre, az_df, raw_df, errors, adj_df = simulator.process_traverse_data(
+            obs, start_coords, hv2_coords, survey_type="Closed"
+        )
+
+        adj_points = adj_df["Ponto"].tolist()
+        self.assertIn("IRR1", adj_points)
+        self.assertIn("IRR2", adj_points)
+
+        irr1_row = adj_df[adj_df["Ponto"] == "IRR1"].iloc[0]
+        self.assertAlmostEqual(irr1_row["E"], 150.0, delta=0.5)
+        self.assertAlmostEqual(irr1_row["N"], 50.0, delta=0.5)
+
 if __name__ == '__main__':
     unittest.main()

@@ -11,6 +11,10 @@ st.set_page_config(page_title="Simulador Topográfico Interativo", layout="wide"
 # --- Session State Initialization ---
 if 'survey_points' not in st.session_state:
     st.session_state.survey_points = []  # List of (lat, lon)
+if 'radiation_points' not in st.session_state:
+    st.session_state.radiation_points = []  # List of dicts
+if 'map_locked' not in st.session_state:
+    st.session_state.map_locked = False
 if 'survey_data' not in st.session_state:
     st.session_state.survey_data = None
 if 'map_zoom' not in st.session_state:
@@ -20,7 +24,9 @@ if 'map_center_coord' not in st.session_state:
 
 def reset_survey():
     st.session_state.survey_points = []
+    st.session_state.radiation_points = []
     st.session_state.survey_data = None
+    st.session_state.map_locked = False
 
 st.title("🏗️ Simulador de Levantamentos Topográficos")
 
@@ -185,6 +191,19 @@ with col_map:
             if i < len(labels):
                 folium.CircleMarker([lat, lon], radius=6, color=colors[i], fill=True, popup=labels[i]).add_to(m)
 
+    # Render Radiation Points on Map
+    if survey_category == "Poligonação" and st.session_state.radiation_points:
+        for rad in st.session_state.radiation_points:
+            rad_lat, rad_lon = rad['lat'], rad['lon']
+            popup_text = f"{rad['name']} (Est: {rad['station']}, Ré: {rad['re']})"
+            folium.CircleMarker([rad_lat, rad_lon], radius=5, color="green", fill=True, fill_color="green", popup=popup_text).add_to(m)
+
+            if rad['station'] in labels:
+                st_idx = labels.index(rad['station'])
+                if st_idx < len(st.session_state.survey_points):
+                    st_lat, st_lon = st.session_state.survey_points[st_idx]
+                    folium.PolyLine([(st_lat, st_lon), (rad_lat, rad_lon)], color="green", weight=1.5, dash_array='3, 3').add_to(m)
+
     map_data = st_folium(
         m,
         center=st.session_state.map_center_coord,
@@ -207,13 +226,38 @@ with col_map:
         if new_zoom:
             st.session_state.map_zoom = int(new_zoom)
 
-        if map_data.get("last_clicked"):
+        if not st.session_state.map_locked and map_data.get("last_clicked"):
             clicked = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
-            if clicked not in st.session_state.survey_points and len(st.session_state.survey_points) < max_pts:
-                st.session_state.survey_points.append(clicked)
-                st.rerun()
+            if len(st.session_state.survey_points) < max_pts:
+                if clicked not in st.session_state.survey_points:
+                    st.session_state.survey_points.append(clicked)
+                    st.rerun()
+            elif survey_category == "Poligonação":
+                existing_rad_coords = [(r['lat'], r['lon']) for r in st.session_state.radiation_points]
+                if clicked not in existing_rad_coords and clicked not in st.session_state.survey_points:
+                    idx = len(st.session_state.radiation_points) + 1
+                    e_pt, n_pt, _, _ = utm.from_latlon(clicked[0], clicked[1])
+                    def_station = labels[1] if len(labels) > 1 else labels[0]
+                    st.session_state.radiation_points.append({
+                        'name': f"IRR{idx}",
+                        'lat': clicked[0],
+                        'lon': clicked[1],
+                        'e': round(float(e_pt), 2),
+                        'n': round(float(n_pt), 2),
+                        'station': def_station,
+                        're': "-- Selecione --"
+                    })
+                    st.rerun()
 
-    if st.button("Limpar Pontos"): reset_survey(); st.rerun()
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("Limpar Pontos"): reset_survey(); st.rerun()
+    with col_btn2:
+        if st.session_state.map_locked:
+            if st.button("🔓 Desbloquear Traçado"):
+                st.session_state.map_locked = False
+                st.session_state.survey_data = None
+                st.rerun()
 
 with col_data:
     st.subheader("Dados dos Vértices")
@@ -237,21 +281,118 @@ with col_data:
             st.session_state.survey_points = new_pts
             st.rerun()
 
+        # Section for Radiation Points
+        if survey_category == "Poligonação":
+            st.write("---")
+            st.subheader("📍 Pontos de Irradiação")
+            if len(st.session_state.survey_points) < max_pts:
+                st.info("Complete a poligonal principal para habilitar a adição de pontos de irradiação.")
+            else:
+                if not st.session_state.map_locked:
+                    col_rad_a, col_rad_b = st.columns(2)
+                    if col_rad_a.button("+ Adicionar Irradiação"):
+                        idx = len(st.session_state.radiation_points) + 1
+                        def_lat, def_lon = st.session_state.map_center_coord
+                        def_lat += 0.0001 * idx
+                        def_lon += 0.0001 * idx
+                        e_pt, n_pt, _, _ = utm.from_latlon(def_lat, def_lon)
+                        def_station = labels[1] if len(labels) > 1 else labels[0]
+                        st.session_state.radiation_points.append({
+                            'name': f"IRR{idx}",
+                            'lat': def_lat,
+                            'lon': def_lon,
+                            'e': round(float(e_pt), 2),
+                            'n': round(float(n_pt), 2),
+                            'station': def_station,
+                            're': "-- Selecione --"
+                        })
+                        st.rerun()
+                    if col_rad_b.button("Limpar Irradiações"):
+                        st.session_state.radiation_points = []
+                        st.rerun()
+
+                if st.session_state.radiation_points:
+                    rad_rows = []
+                    for r in st.session_state.radiation_points:
+                        rad_rows.append({
+                            "Ponto": r['name'],
+                            "Este (m)": r['e'],
+                            "Norte (m)": r['n'],
+                            "Estação": r['station'] if r['station'] in labels else labels[0],
+                            "Ré": r['re'] if r['re'] in labels or r['re'] == "-- Selecione --" else "-- Selecione --"
+                        })
+                    df_rad = pd.DataFrame(rad_rows)
+                    edited_rad_df = st.data_editor(
+                        df_rad,
+                        column_config={
+                            "Ponto": st.column_config.TextColumn("Ponto", disabled=True),
+                            "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.2f"),
+                            "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.2f"),
+                            "Estação": st.column_config.SelectboxColumn("Estação", options=labels, required=True),
+                            "Ré": st.column_config.SelectboxColumn("Ré", options=["-- Selecione --"] + labels, required=True)
+                        },
+                        disabled=st.session_state.map_locked,
+                        num_rows="fixed",
+                        use_container_width=True,
+                        key="rad_editor"
+                    )
+
+                    if not edited_rad_df.equals(df_rad):
+                        updated_rads = []
+                        for idx_r, row_r in edited_rad_df.iterrows():
+                            try:
+                                nl_r, nln_r = utm.to_latlon(row_r["Este (m)"], row_r["Norte (m)"], utm_zone, utm_letter)
+                            except:
+                                nl_r, nln_r = st.session_state.radiation_points[idx_r]['lat'], st.session_state.radiation_points[idx_r]['lon']
+                            updated_rads.append({
+                                'name': row_r["Ponto"],
+                                'lat': nl_r,
+                                'lon': nln_r,
+                                'e': float(row_r["Este (m)"]),
+                                'n': float(row_r["Norte (m)"]),
+                                'station': row_r["Estação"],
+                                're': row_r["Ré"]
+                            })
+                        st.session_state.radiation_points = updated_rads
+                        st.rerun()
+
+        if st.session_state.map_locked:
+            st.info("🔒 Traçado e irradiações bloqueados.")
+
         if st.button("Simular Observações de Campo"):
             if len(st.session_state.survey_points) < max_pts:
                 st.error(f"Selecione todos os {max_pts} pontos!")
             else:
-                e_coords = df_pts["Este (m)"].values
-                n_coords = df_pts["Norte (m)"].values
-                if survey_category == "Poligonação":
-                    st.session_state.survey_data = simulator.simulate_traverse_observations(
-                        e_coords, n_coords, survey_type="Closed" if survey_type == "Fechada" else "Linked"
-                    )
+                # Validation check for radiation points
+                invalid_rad = False
+                if survey_category == "Poligonação" and st.session_state.radiation_points:
+                    for rad in st.session_state.radiation_points:
+                        re_val = rad.get("re")
+                        st_val = rad.get("station")
+                        if not re_val or re_val in ["-- Selecione --", ""] or re_val not in labels:
+                            invalid_rad = True
+                            break
+                        if re_val == st_val:
+                            invalid_rad = True
+                            break
+
+                if invalid_rad:
+                    st.error("Erro: Selecione uma estação de Ré válida (diferente da Estação) para todos os pontos de irradiação!")
                 else:
-                    obs, elevs = simulator.simulate_leveling(len(e_coords), type=survey_type, method=method)
-                    st.session_state.survey_data = obs
-                    st.session_state.true_elevations = elevs
-                st.rerun()
+                    st.session_state.map_locked = True
+                    e_coords = df_pts["Este (m)"].values
+                    n_coords = df_pts["Norte (m)"].values
+                    if survey_category == "Poligonação":
+                        st.session_state.survey_data = simulator.simulate_traverse_observations(
+                            e_coords, n_coords,
+                            survey_type="Closed" if survey_type == "Fechada" else "Linked",
+                            radiation_data=st.session_state.radiation_points
+                        )
+                    else:
+                        obs, elevs = simulator.simulate_leveling(len(e_coords), type=survey_type, method=method)
+                        st.session_state.survey_data = obs
+                        st.session_state.true_elevations = elevs
+                    st.rerun()
 
 # --- Results Modules ---
 if st.session_state.survey_data is not None:

@@ -65,9 +65,9 @@ def generate_traverse_coordinates(n_intermediate, survey_type="Closed", start_la
 
         return np.array(lats), np.array(lons)
 
-def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", angle_sigma=0.005, dist_sigma=0.005):
+def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", angle_sigma=0.005, dist_sigma=0.005, radiation_data=None):
     """
-    Simulates raw field observations.
+    Simulates raw field observations for main traverse and optional radiation points.
     """
     n = len(e_coords)
     observations = []
@@ -90,6 +90,10 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
             if idx == n-1: return "HV5"
             return f"P{idx-1}"
 
+    label_to_coords = {}
+    for i in range(n):
+        label_to_coords[get_label(i)] = (e_coords[i], n_coords[i], elevations[i])
+
     stations = []
     if survey_type == "Closed":
         # Stations: HV2, P1...Pn-2, then back to HV2
@@ -110,7 +114,13 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
         for i in range(1, n - 1):
             stations.append((i, i-1, i+1))
 
+    station_zero_dir = {} # Store circle zero direction per station
+
     for s_idx, re_idx, v_idx in stations:
+        s_label = get_label(s_idx)
+        re_label = get_label(re_idx)
+        v_label = get_label(v_idx)
+
         d_horiz_true = np.sqrt((e_coords[v_idx]-e_coords[s_idx])**2 + (n_coords[v_idx]-n_coords[s_idx])**2)
         d_inc_true = np.sqrt(d_horiz_true**2 + (elevations[v_idx]-elevations[s_idx])**2)
         d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
@@ -119,6 +129,9 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
         az_fs = calculate_azimuth_flat(e_coords[s_idx], n_coords[s_idx], e_coords[v_idx], n_coords[v_idx])
         az_re = calculate_azimuth_flat(e_coords[s_idx], n_coords[s_idx], e_coords[re_idx], n_coords[re_idx])
 
+        # Station circle zero direction
+        station_zero_dir[s_label] = (dir_re - az_re + 360) % 360
+
         true_angle = (az_fs - az_re + 360) % 360
         dir_vante = (dir_re + true_angle + np.random.normal(0, angle_sigma)) % 360
 
@@ -126,40 +139,124 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
         zenith_measured = 90 - slope_angle + np.random.normal(0, angle_sigma)
 
         observations.append({
-            "Estação": get_label(s_idx),
-            "Ré": get_label(re_idx),
-            "Vante": get_label(v_idx),
+            "Estação": s_label,
+            "Ré": re_label,
+            "Vante": v_label,
             "Dir. Ré (°)": round(dir_re, 8),
             "Dir. Vante (°)": round(dir_vante, 8),
             "Ângulo Zenital (°)": round(zenith_measured, 8),
             "Dist. Inclinada (m)": round(d_inc_measured, 3)
         })
 
+    # Process Radiation Points if provided
+    if radiation_data is not None:
+        if isinstance(radiation_data, pd.DataFrame):
+            rad_list = radiation_data.to_dict("records")
+        else:
+            rad_list = radiation_data
+
+        for rad in rad_list:
+            v_label = rad.get("Ponto") or rad.get("name")
+            s_label = rad.get("Estação") or rad.get("station")
+            re_label = rad.get("Ré") or rad.get("re")
+            e_v = float(rad.get("E") if rad.get("E") is not None else rad.get("e", 0.0))
+            n_v = float(rad.get("N") if rad.get("N") is not None else rad.get("n", 0.0))
+
+            if not s_label or not re_label or s_label not in label_to_coords or re_label not in label_to_coords:
+                continue
+
+            e_s, n_s, z_s = label_to_coords[s_label]
+            e_r, n_r, z_r = label_to_coords[re_label]
+            z_v = float(rad.get("Z", z_s + np.random.normal(0, 0.5)))
+
+            d_horiz_true = np.sqrt((e_v - e_s)**2 + (n_v - n_s)**2)
+            d_inc_true = np.sqrt(d_horiz_true**2 + (z_v - z_s)**2)
+            d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
+
+            dir_0 = station_zero_dir.get(s_label, np.random.uniform(0, 360))
+
+            az_re = calculate_azimuth_flat(e_s, n_s, e_r, n_r)
+            az_fs = calculate_azimuth_flat(e_s, n_s, e_v, n_v)
+
+            dir_re = (dir_0 + az_re) % 360
+            true_angle = (az_fs - az_re + 360) % 360
+            dir_vante = (dir_re + true_angle + np.random.normal(0, angle_sigma)) % 360
+
+            slope_angle = np.degrees(np.arctan2(z_v - z_s, d_horiz_true)) if d_horiz_true > 1e-6 else 0.0
+            zenith_measured = 90 - slope_angle + np.random.normal(0, angle_sigma)
+
+            observations.append({
+                "Estação": s_label,
+                "Ré": re_label,
+                "Vante": v_label,
+                "Dir. Ré (°)": round(dir_re, 8),
+                "Dir. Vante (°)": round(dir_vante, 8),
+                "Ângulo Zenital (°)": round(zenith_measured, 8),
+                "Dist. Inclinada (m)": round(d_inc_measured, 3)
+            })
+
     return pd.DataFrame(observations)
 
 def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", end_coords_start=None, end_coords_end=None):
     """
-    Strict calculation workflow for Linked and Closed traverses.
+    Strict calculation workflow for Linked and Closed traverses, including radiation points.
     """
     pre = df.copy()
     pre["Ângulo Horiz. (°)"] = ((pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360).round(8)
     pre["Dist. Horizontal (m)"] = pre["Dist. Inclinada (m)"] * np.sin(np.radians(pre["Ângulo Zenital (°)"]))
     pre["ΔH (m)"] = pre["Dist. Inclinada (m)"] * np.cos(np.radians(pre["Ângulo Zenital (°)"]))
 
+    # Separate main traverse setups from radiation setups
+    # Main traverse stations start with HV labels or P labels.
+    # We can detect main setups vs radiation setups based on Vante label.
+    main_labels = {"HV1", "HV2", "HV4", "HV5"}
+    # Gather all P_i labels that form main sequence if needed, or identify radiation rows
+    # In simulated observations, main traverse rows come first in sequence.
+    # For Closed: main setups end with the setup at HV2 aiming back to P1.
+    # For Linked: main setups end with HV4 aiming HV5.
+    main_setup_indices = []
+    rad_setup_indices = []
+
+    for idx, row in pre.iterrows():
+        v_label = row["Vante"]
+        # Check if v_label is part of main traverse or radiation
+        # Main traverse points are HV1, HV2, HV4, HV5, or P1..P48 (when in sequence)
+        # However, radiation points are typically IRR1, IRR2, or points not in main setup loop
+        if v_label.startswith("IRR") or (idx > 0 and v_label == "P1" and survey_type == "Closed" and idx < len(pre) - 1 and pre.iloc[idx-1]["Estação"] == "HV2"):
+            # Check carefully: in Closed traverse, setup 0 is HV2->P1, and setup n-1 is HV2->P1 (closure).
+            # If v_label is IRR... or clearly radiation, add to rad.
+            rad_setup_indices.append(idx)
+        else:
+            # Check if we already reached closure for Closed traverse
+            if survey_type == "Closed" and len(main_setup_indices) > 0 and pre.iloc[main_setup_indices[-1]]["Estação"] == "HV2" and pre.iloc[main_setup_indices[-1]]["Vante"] == "P1" and len(main_setup_indices) > 2:
+                # After closure setup at HV2, any subsequent setup is radiation
+                rad_setup_indices.append(idx)
+            elif survey_type == "Linked" and len(main_setup_indices) > 0 and pre.iloc[main_setup_indices[-1]]["Estação"] == "HV4" and pre.iloc[main_setup_indices[-1]]["Vante"] == "HV5":
+                # After HV4->HV5 setup, any subsequent setup is radiation
+                rad_setup_indices.append(idx)
+            else:
+                if v_label.startswith("IRR"):
+                    rad_setup_indices.append(idx)
+                else:
+                    main_setup_indices.append(idx)
+
+    pre_main = pre.loc[main_setup_indices].reset_index(drop=True)
+    pre_rad = pre.loc[rad_setup_indices].reset_index(drop=True)
+
     # 1. Initial Azimuth (HV1 -> HV2)
     az_hv1_hv2 = calculate_azimuth_flat(start_coords[0], start_coords[1], hv2_coords[0], hv2_coords[1])
 
     # 2. Azimuth Propagation and Angular Closure
-    n_setups = len(pre)
+    n_setups = len(pre_main)
     az_back = (az_hv1_hv2 + 180) % 360
 
     propagated_azimuths = []
-    curr_az = (az_back + pre.iloc[0]["Ângulo Horiz. (°)"]) % 360
+    curr_az = (az_back + pre_main.iloc[0]["Ângulo Horiz. (°)"]) % 360
     propagated_azimuths.append(curr_az)
 
     for i in range(1, n_setups):
         # Az(i -> i-1) = Az(i-1 -> i) + 180
-        curr_az = (curr_az + 180 + pre.iloc[i]["Ângulo Horiz. (°)"]) % 360
+        curr_az = (curr_az + 180 + pre_main.iloc[i]["Ângulo Horiz. (°)"]) % 360
         propagated_azimuths.append(curr_az)
 
     if survey_type == "Closed":
@@ -182,19 +279,19 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     # 3. Corrected Azimuths
     adj_azimuths = []
     # Re-propagate with corrections
-    curr_az = (az_back + pre.iloc[0]["Ângulo Horiz. (°)"] + corr_ang_per_station) % 360
+    curr_az = (az_back + pre_main.iloc[0]["Ângulo Horiz. (°)"] + corr_ang_per_station) % 360
     adj_azimuths.append(curr_az)
     for i in range(1, n_setups):
-        curr_az = (curr_az + 180 + pre.iloc[i]["Ângulo Horiz. (°)"] + corr_ang_per_station) % 360
+        curr_az = (curr_az + 180 + pre_main.iloc[i]["Ângulo Horiz. (°)"] + corr_ang_per_station) % 360
         adj_azimuths.append(curr_az)
 
     # 3b. Transported Azimuths DataFrame
     az_data = []
     for i in range(n_setups):
         az_data.append({
-            "Estação": pre.iloc[i]["Estação"],
-            "Ré": pre.iloc[i]["Ré"],
-            "Vante": pre.iloc[i]["Vante"],
+            "Estação": pre_main.iloc[i]["Estação"],
+            "Ré": pre_main.iloc[i]["Ré"],
+            "Vante": pre_main.iloc[i]["Vante"],
             "Azimute Transportado (°)": round(float(propagated_azimuths[i]), 8),
             "Correção (°)": round(float((i + 1) * corr_ang_per_station), 8),
             "Azimute Corrigido (°)": round(float(adj_azimuths[i]), 8)
@@ -208,33 +305,24 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
         {"Ponto": "HV2", "E": hv2_coords[0], "N": hv2_coords[1], "Z": hv2_coords[2]}
     ]
 
-    # We calculate points up to HV4 (the last station setup's "Vante" is HV5)
-    # Actually, the last station HV4 has Vante HV5.
-    # We need linear closure at HV4.
-    # setups: HV2 -> P1, P1 -> P2, ..., Pn -> HV4, HV4 -> HV5
-    # indices: 0, 1, ..., n_setups-2, n_setups-1
-
     # Coordinates calculation loop
     for i in range(n_setups - 1): # Exclude last setup (HV4-HV5) for coordinate propagation to HV4
-        dist = pre.iloc[i]["Dist. Horizontal (m)"]
+        dist = pre_main.iloc[i]["Dist. Horizontal (m)"]
         az = adj_azimuths[i]
         de = dist * np.sin(np.radians(az))
         dn = dist * np.cos(np.radians(az))
-        dz = pre.iloc[i]["ΔH (m)"]
+        dz = pre_main.iloc[i]["ΔH (m)"]
 
         last = raw_coords[-1]
         raw_coords.append({
-            "Ponto": pre.iloc[i]["Vante"],
+            "Ponto": pre_main.iloc[i]["Vante"],
             "E": last["E"] + de,
             "N": last["N"] + dn,
             "Z": last["Z"] + dz
         })
 
-    # Final point in raw_coords is HV4. Add HV5 just for labeling purposes in final table?
-    # No, linear closure is at HV4.
-
     # 5. Linear Closure (Bowditch)
-    total_dist = pre.iloc[:n_setups-1]["Dist. Horizontal (m)"].sum()
+    total_dist = pre_main.iloc[:n_setups-1]["Dist. Horizontal (m)"].sum()
     if survey_type == "Closed":
         err_e = raw_coords[-1]["E"] - hv2_coords[0]
         err_n = raw_coords[-1]["N"] - hv2_coords[1]
@@ -258,7 +346,7 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     # Apply Bowditch to P1...HV4
     cum_dist = 0
     for i in range(n_setups - 1):
-        cum_dist += pre.iloc[i]["Dist. Horizontal (m)"]
+        cum_dist += pre_main.iloc[i]["Dist. Horizontal (m)"]
         corr_e = -err_e * (cum_dist / total_dist)
         corr_n = -err_n * (cum_dist / total_dist)
         corr_z = -err_z * (cum_dist / total_dist)
@@ -276,17 +364,72 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     if survey_type == "Linked":
         # HV5 position can be calculated from adjusted HV4 + corrected Az(HV4-HV5)
         last_adj = adj_coords[-1] # HV4
-        dist_final = pre.iloc[-1]["Dist. Horizontal (m)"]
+        dist_final = pre_main.iloc[-1]["Dist. Horizontal (m)"]
         az_final = adj_azimuths[-1]
         hv5_e = last_adj["E"] + dist_final * np.sin(np.radians(az_final))
         hv5_n = last_adj["N"] + dist_final * np.cos(np.radians(az_final))
-        hv5_z = last_adj["Z"] + pre.iloc[-1]["ΔH (m)"]
+        hv5_z = last_adj["Z"] + pre_main.iloc[-1]["ΔH (m)"]
 
         adj_coords.append({
             "Ponto": "HV5", "E": round(hv5_e, 3), "N": round(hv5_n, 3), "Z": round(hv5_z, 3),
             "Correção E": 0.0, "Correção N": 0.0, "Correção Z": 0.0
         })
         raw_coords.append({"Ponto": "HV5", "E": round(hv5_e, 3), "N": round(hv5_n, 3), "Z": round(hv5_z, 3)})
+
+    # Append radiation points to adj_coords and raw_coords
+    adj_map = {pt["Ponto"]: pt for pt in adj_coords}
+    raw_map = {pt["Ponto"]: pt for pt in raw_coords}
+
+    for _, rad_row in pre_rad.iterrows():
+        s_lbl = rad_row["Estação"]
+        re_lbl = rad_row["Ré"]
+        v_lbl = rad_row["Vante"]
+        ang_h = rad_row["Ângulo Horiz. (°)"]
+        dist_h = rad_row["Dist. Horizontal (m)"]
+        dh = rad_row["ΔH (m)"]
+
+        if s_lbl in adj_map and re_lbl in adj_map:
+            st_pt = adj_map[s_lbl]
+            re_pt = adj_map[re_lbl]
+
+            az_sr = calculate_azimuth_flat(st_pt["E"], st_pt["N"], re_pt["E"], re_pt["N"])
+            az_sv = (az_sr + ang_h) % 360
+
+            e_v = st_pt["E"] + dist_h * np.sin(np.radians(az_sv))
+            n_v = st_pt["N"] + dist_h * np.cos(np.radians(az_sv))
+            z_v = st_pt["Z"] + dh
+
+            adj_pt = {
+                "Ponto": v_lbl,
+                "Correção E": 0.0,
+                "Correção N": 0.0,
+                "Correção Z": 0.0,
+                "E": round(float(e_v), 3),
+                "N": round(float(n_v), 3),
+                "Z": round(float(z_v), 3)
+            }
+            adj_coords.append(adj_pt)
+            adj_map[v_lbl] = adj_pt
+
+        if s_lbl in raw_map and re_lbl in raw_map:
+            st_pt = raw_map[s_lbl]
+            re_pt = raw_map[re_lbl]
+
+            az_sr = calculate_azimuth_flat(st_pt["E"], st_pt["N"], re_pt["E"], re_pt["N"])
+            az_sv = (az_sr + ang_h) % 360
+
+            e_v = st_pt["E"] + dist_h * np.sin(np.radians(az_sv))
+            n_v = st_pt["N"] + dist_h * np.cos(np.radians(az_sv))
+            z_v = st_pt["Z"] + dh
+
+            raw_pt = {
+                "Ponto": v_lbl,
+                "E": round(float(e_v), 3),
+                "N": round(float(n_v), 3),
+                "Z": round(float(z_v), 3)
+            }
+            raw_coords.append(raw_pt)
+            raw_map[v_lbl] = raw_pt
 
     raw_df = pd.DataFrame(raw_coords)
     for col in ["E", "N", "Z"]: raw_df[col] = raw_df[col].round(3)
