@@ -75,6 +75,19 @@ def calculate_azimuth_flat(e1, n1, e2, n2):
     azimuth = np.degrees(np.arctan2(de, dn))
     return (azimuth + 360) % 360
 
+def get_automatic_backsight(station_label, labels):
+    """
+    Returns the preceding station in the traverse sequence `labels` as the automatic Backsight (Ré).
+    """
+    if not labels or station_label not in labels:
+        return ""
+    idx = labels.index(station_label)
+    if idx > 0:
+        return labels[idx - 1]
+    elif len(labels) > 1:
+        return labels[1]
+    return labels[0]
+
 def generate_traverse_coordinates(n_intermediate, survey_type="Closed", start_lat=-23.5505, start_lon=-46.6333, scale=0.001):
     """
     Generates coordinates for traverse.

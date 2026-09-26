@@ -238,6 +238,7 @@ with col_map:
                     idx = len(st.session_state.radiation_points) + 1
                     e_pt, n_pt, _, _ = utm.from_latlon(clicked[0], clicked[1])
                     def_station = labels[1] if len(labels) > 1 else labels[0]
+                    def_re = simulator.get_automatic_backsight(def_station, labels)
                     st.session_state.radiation_points.append({
                         'name': f"IRR{idx}",
                         'lat': clicked[0],
@@ -245,7 +246,7 @@ with col_map:
                         'e': round(float(e_pt), 3),
                         'n': round(float(n_pt), 3),
                         'station': def_station,
-                        're': "-- Selecione --"
+                        're': def_re
                     })
                     st.rerun()
 
@@ -308,6 +309,7 @@ with col_data:
                         def_lon += 0.0001 * idx
                         e_pt, n_pt, _, _ = utm.from_latlon(def_lat, def_lon)
                         def_station = labels[1] if len(labels) > 1 else labels[0]
+                        def_re = simulator.get_automatic_backsight(def_station, labels)
                         st.session_state.radiation_points.append({
                             'name': f"IRR{idx}",
                             'lat': def_lat,
@@ -315,7 +317,7 @@ with col_data:
                             'e': round(float(e_pt), 3),
                             'n': round(float(n_pt), 3),
                             'station': def_station,
-                            're': "-- Selecione --"
+                            're': def_re
                         })
                         st.rerun()
                     if col_rad_b.button("Limpar Irradiações"):
@@ -325,12 +327,16 @@ with col_data:
                 if st.session_state.radiation_points:
                     rad_rows = []
                     for r in st.session_state.radiation_points:
+                        st_val = r['station'] if r['station'] in labels else labels[0]
+                        auto_re = simulator.get_automatic_backsight(st_val, labels)
+                        r['station'] = st_val
+                        r['re'] = auto_re
                         rad_rows.append({
                             "Ponto": r['name'],
                             "Este (m)": r['e'],
                             "Norte (m)": r['n'],
-                            "Estação": r['station'] if r['station'] in labels else labels[0],
-                            "Ré": r['re'] if r['re'] in labels or r['re'] == "-- Selecione --" else "-- Selecione --"
+                            "Estação": st_val,
+                            "Ré": auto_re
                         })
                     df_rad = pd.DataFrame(rad_rows)
                     edited_rad_df = st.data_editor(
@@ -340,7 +346,7 @@ with col_data:
                             "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.3f"),
                             "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.3f"),
                             "Estação": st.column_config.SelectboxColumn("Estação", options=labels, required=True),
-                            "Ré": st.column_config.SelectboxColumn("Ré", options=["-- Selecione --"] + labels, required=True)
+                            "Ré": st.column_config.TextColumn("Ré (Automático)", disabled=True)
                         },
                         disabled=st.session_state.map_locked,
                         num_rows="fixed",
@@ -355,14 +361,16 @@ with col_data:
                                 nl_r, nln_r = utm.to_latlon(row_r["Este (m)"], row_r["Norte (m)"], utm_zone, utm_letter)
                             except:
                                 nl_r, nln_r = st.session_state.radiation_points[idx_r]['lat'], st.session_state.radiation_points[idx_r]['lon']
+                            st_val = row_r["Estação"]
+                            auto_re = simulator.get_automatic_backsight(st_val, labels)
                             updated_rads.append({
                                 'name': row_r["Ponto"],
                                 'lat': nl_r,
                                 'lon': nln_r,
                                 'e': float(row_r["Este (m)"]),
                                 'n': float(row_r["Norte (m)"]),
-                                'station': row_r["Estação"],
-                                're': row_r["Ré"]
+                                'station': st_val,
+                                're': auto_re
                             })
                         st.session_state.radiation_points = updated_rads
                         st.rerun()

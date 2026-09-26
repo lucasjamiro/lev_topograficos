@@ -88,6 +88,21 @@ class TestTraverseSimulation(unittest.TestCase):
         obs, elevs = simulator.simulate_leveling(4, type="Geometric")
         self.assertIn('AI (m)', obs.columns)
 
+    def test_get_automatic_backsight(self):
+        # Closed traverse sequence: HV1, HV2, P1, P2, P3
+        closed_labels = ["HV1", "HV2", "P1", "P2", "P3"]
+        self.assertEqual(simulator.get_automatic_backsight("HV2", closed_labels), "HV1")
+        self.assertEqual(simulator.get_automatic_backsight("P1", closed_labels), "HV2")
+        self.assertEqual(simulator.get_automatic_backsight("P2", closed_labels), "P1")
+        self.assertEqual(simulator.get_automatic_backsight("P3", closed_labels), "P2")
+
+        # Linked traverse sequence: HV1, HV2, P1, P2, HV4, HV5
+        linked_labels = ["HV1", "HV2", "P1", "P2", "HV4", "HV5"]
+        self.assertEqual(simulator.get_automatic_backsight("HV2", linked_labels), "HV1")
+        self.assertEqual(simulator.get_automatic_backsight("P1", linked_labels), "HV2")
+        self.assertEqual(simulator.get_automatic_backsight("HV4", linked_labels), "P2")
+        self.assertEqual(simulator.get_automatic_backsight("HV5", linked_labels), "HV4")
+
     def test_radiation_simulation_and_processing(self):
         e_coords = np.array([0, 100, 100, 0, 0], dtype=float)
         n_coords = np.array([0, 0, 100, 100, 0], dtype=float)
