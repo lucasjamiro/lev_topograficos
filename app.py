@@ -77,36 +77,36 @@ if survey_category == "Poligonação":
     # Sync inputs from map clicks
     if len(st.session_state.survey_points) >= 1:
         e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[0])
-        st.session_state.e1_input = round(float(e), 2)
-        st.session_state.n1_input = round(float(n), 2)
+        st.session_state.e1_input = round(float(e), 3)
+        st.session_state.n1_input = round(float(n), 3)
     if len(st.session_state.survey_points) >= 2:
         e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[1])
-        st.session_state.e2_input = round(float(e), 2)
-        st.session_state.n2_input = round(float(n), 2)
+        st.session_state.e2_input = round(float(e), 3)
+        st.session_state.n2_input = round(float(n), 3)
 
     e_hv_end1, n_hv_end1, e_hv_end2, n_hv_end2 = None, None, None, None
     if survey_type == "Enquadrada":
         if len(st.session_state.survey_points) >= max_pts - 1:
             e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[max_pts-2])
-            st.session_state.e_hv4_input = round(float(e), 2)
-            st.session_state.n_hv4_input = round(float(n), 2)
+            st.session_state.e_hv4_input = round(float(e), 3)
+            st.session_state.n_hv4_input = round(float(n), 3)
         if len(st.session_state.survey_points) >= max_pts:
             e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[max_pts-1])
-            st.session_state.e_hv5_input = round(float(e), 2)
-            st.session_state.n_hv5_input = round(float(n), 2)
+            st.session_state.e_hv5_input = round(float(e), 3)
+            st.session_state.n_hv5_input = round(float(n), 3)
 
     st.sidebar.write("**Partida:**")
-    e1 = st.sidebar.number_input("HV1 Este (m)", format="%.2f", key="e1_input")
-    n1 = st.sidebar.number_input("HV1 Norte (m)", format="%.2f", key="n1_input")
-    e_hv2 = st.sidebar.number_input("HV2 Este (m)", format="%.2f", key="e2_input")
-    n_hv2 = st.sidebar.number_input("HV2 Norte (m)", format="%.2f", key="n2_input")
+    e1 = st.sidebar.number_input("HV1 Este (m)", format="%.3f", key="e1_input")
+    n1 = st.sidebar.number_input("HV1 Norte (m)", format="%.3f", key="n1_input")
+    e_hv2 = st.sidebar.number_input("HV2 Este (m)", format="%.3f", key="e2_input")
+    n_hv2 = st.sidebar.number_input("HV2 Norte (m)", format="%.3f", key="n2_input")
 
     if survey_type == "Enquadrada":
         st.sidebar.write("**Chegada:**")
-        e_hv_end1 = st.sidebar.number_input("HV4 Este (m)", format="%.2f", key="e_hv4_input")
-        n_hv_end1 = st.sidebar.number_input("HV4 Norte (m)", format="%.2f", key="n_hv4_input")
-        e_hv_end2 = st.sidebar.number_input("HV5 Este (m)", format="%.2f", key="e_hv5_input")
-        n_hv_end2 = st.sidebar.number_input("HV5 Norte (m)", format="%.2f", key="n_hv5_input")
+        e_hv_end1 = st.sidebar.number_input("HV4 Este (m)", format="%.3f", key="e_hv4_input")
+        n_hv_end1 = st.sidebar.number_input("HV4 Norte (m)", format="%.3f", key="n_hv4_input")
+        e_hv_end2 = st.sidebar.number_input("HV5 Este (m)", format="%.3f", key="e_hv5_input")
+        n_hv_end2 = st.sidebar.number_input("HV5 Norte (m)", format="%.3f", key="n_hv5_input")
 
     utm_zone = st.sidebar.number_input("Zona UTM", value=u_zone, min_value=1, max_value=60)
     utm_letter = st.sidebar.text_input("Letra UTM", value=u_letter).upper()
@@ -242,8 +242,8 @@ with col_map:
                         'name': f"IRR{idx}",
                         'lat': clicked[0],
                         'lon': clicked[1],
-                        'e': round(float(e_pt), 2),
-                        'n': round(float(n_pt), 2),
+                        'e': round(float(e_pt), 3),
+                        'n': round(float(n_pt), 3),
                         'station': def_station,
                         're': "-- Selecione --"
                     })
@@ -266,10 +266,21 @@ with col_data:
         for i, (lat, lon) in enumerate(st.session_state.survey_points):
             e, n, zone, letter = utm.from_latlon(lat, lon)
             pt_label = labels[i] if i < len(labels) else f"P{i+1}"
-            utm_data.append({"Ponto": pt_label, "Este (m)": round(e, 2), "Norte (m)": round(n, 2)})
+            utm_data.append({"Ponto": pt_label, "Este (m)": round(e, 3), "Norte (m)": round(n, 3)})
 
         df_pts = pd.DataFrame(utm_data)
-        edited_df = st.data_editor(df_pts, use_container_width=True, num_rows="fixed", disabled=["Ponto"], key="vertex_editor")
+        edited_df = st.data_editor(
+            df_pts,
+            column_config={
+                "Ponto": st.column_config.TextColumn("Ponto", disabled=True),
+                "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.3f"),
+                "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.3f"),
+            },
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=["Ponto"],
+            key="vertex_editor"
+        )
 
         if not edited_df.equals(df_pts):
             new_pts = []
@@ -301,8 +312,8 @@ with col_data:
                             'name': f"IRR{idx}",
                             'lat': def_lat,
                             'lon': def_lon,
-                            'e': round(float(e_pt), 2),
-                            'n': round(float(n_pt), 2),
+                            'e': round(float(e_pt), 3),
+                            'n': round(float(n_pt), 3),
                             'station': def_station,
                             're': "-- Selecione --"
                         })
@@ -326,8 +337,8 @@ with col_data:
                         df_rad,
                         column_config={
                             "Ponto": st.column_config.TextColumn("Ponto", disabled=True),
-                            "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.2f"),
-                            "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.2f"),
+                            "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.3f"),
+                            "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.3f"),
                             "Estação": st.column_config.SelectboxColumn("Estação", options=labels, required=True),
                             "Ré": st.column_config.SelectboxColumn("Ré", options=["-- Selecione --"] + labels, required=True)
                         },
@@ -409,28 +420,28 @@ if st.session_state.survey_data is not None:
         )
 
         t1, t2, t3, t4, t5, t6 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "🧭 Azimutes Transportados", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
-        with t1: st.dataframe(st.session_state.survey_data, use_container_width=True)
+        with t1: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
         with t2:
             if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(pre, use_container_width=True)
+            else: st.dataframe(simulator.format_df_for_display(pre), use_container_width=True)
         with t3:
             if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(az_df, use_container_width=True)
+            else: st.dataframe(simulator.format_df_for_display(az_df), use_container_width=True)
         with t4:
             if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(raw, use_container_width=True)
+            else: st.dataframe(simulator.format_df_for_display(raw), use_container_width=True)
         with t5:
             if challenge_mode:
-                uea = st.number_input("Erro Angular (°)", format="%.5f")
-                uep = st.number_input("Erro Planimétrico (m)", format="%.3f")
+                uea = st.number_input("Erro Angular (°)", format="%.7f")
+                uep = st.number_input("Erro Planimétrico (m)", format="%.4f")
                 if st.button("Verificar Erros"):
                     if abs(uea - errs['Erro Angular (°)']) < 0.0001 and abs(uep - errs['Erro Planimétrico (m)']) < 0.01:
                         st.success("Correto!")
                     else: st.error("Divergência nos cálculos.")
             else:
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Erro Angular", f"{errs['Erro Angular (°)']:.5f}°")
-                c2.metric("Erro Planimétrico", f"{errs['Erro Planimétrico (m)']:.3f} m")
+                c1.metric("Erro Angular", f"{simulator.format_num(errs['Erro Angular (°)'], 7)}°")
+                c2.metric("Erro Planimétrico", f"{simulator.format_num(errs['Erro Planimétrico (m)'], 4)} m")
                 c3.metric("Precisão", errs['Precisão Relativa'])
         with t6:
             if challenge_mode:
@@ -443,10 +454,10 @@ if st.session_state.survey_data is not None:
                     else: st.error("Divergência.")
             else:
                 final_cols = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
-                st.dataframe(adj[final_cols], use_container_width=True)
+                st.dataframe(simulator.format_df_for_display(adj[final_cols]), use_container_width=True)
     else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
-        if not challenge_mode: st.dataframe(st.session_state.survey_data, use_container_width=True)
+        if not challenge_mode: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
         if survey_type == "Geométrico":
             st.header("🔍 Leitura de Réguas")
             sel = st.selectbox("Estação", range(len(st.session_state.survey_data)))
@@ -458,5 +469,5 @@ if st.session_state.survey_data is not None:
         uevs = [st.number_input(f"Cota P{i+1}", format="%.3f", key=f"lev_{i}") for i in range(len(st.session_state.survey_points))]
         if st.button("Verificar Cotas"):
             err = np.mean([abs(u - c) for u, c in zip(uevs, st.session_state.true_elevations)])
-            if err < 0.005: st.success(f"Correto! Erro: {err:.4f}m")
-            else: st.error(f"Divergência. Erro: {err:.4f}m")
+            if err < 0.005: st.success(f"Correto! Erro: {simulator.format_num(err, 4)}m")
+            else: st.error(f"Divergência. Erro: {simulator.format_num(err, 4)}m")

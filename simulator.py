@@ -1,6 +1,73 @@
 import numpy as np
 import pandas as pd
 
+COLUMN_PRECISION_MAP = {
+    # Angles (7 decimals)
+    "Dir. Ré (°)": 7,
+    "Dir. Vante (°)": 7,
+    "Ângulo Zenital (°)": 7,
+    "Ângulo Horiz. (°)": 7,
+    "Azimute Transportado (°)": 7,
+    "Correção (°)": 7,
+    "Azimute Corrigido (°)": 7,
+    "Ângulo Vertical (deg)": 7,
+    "Erro Angular (°)": 7,
+
+    # Distances (4 decimals)
+    "Dist. Inclinada (m)": 4,
+    "Dist. Horizontal (m)": 4,
+    "Dist (m)": 4,
+    "V. Ré (m)": 4,
+    "V. Vante (m)": 4,
+    "Erro Planimétrico (m)": 4,
+
+    # Partial Coordinates / Increments (5 decimals)
+    "ΔH (m)": 5,
+    "Correção E": 5,
+    "Correção N": 5,
+    "Correção Z": 5,
+
+    # Final Coordinates & Elevations / Z (3 decimals)
+    "E": 3,
+    "N": 3,
+    "Z": 3,
+    "Este (m)": 3,
+    "Norte (m)": 3,
+    "AI (m)": 3,
+    "Alt. Instrumento (m)": 3,
+    "Alt. Sinal (m)": 3,
+    "Erro Altimétrico (m)": 3,
+}
+
+def format_num(val, decimals=3):
+    """
+    Formats a numeric value using Portuguese locale conventions:
+    dot (.) as thousands separator and comma (,) as decimal separator.
+    """
+    if val is None or pd.isna(val):
+        return ""
+    try:
+        s = f"{float(val):,.{decimals}f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return str(val)
+
+def format_df_for_display(df):
+    """
+    Returns a copy of the DataFrame with numeric columns formatted to strings
+    matching the required decimal precision and locale separators.
+    """
+    if df is None or df.empty:
+        return df
+
+    formatted_df = df.copy()
+    for col in formatted_df.columns:
+        if col in COLUMN_PRECISION_MAP:
+            prec = COLUMN_PRECISION_MAP[col]
+            formatted_df[col] = formatted_df[col].apply(lambda x: format_num(x, prec))
+
+    return formatted_df
+
 def calculate_azimuth_flat(e1, n1, e2, n2):
     """Calculates azimuth between two points in a flat coordinate system (UTM)."""
     de = e2 - e1
@@ -142,10 +209,10 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
             "Estação": s_label,
             "Ré": re_label,
             "Vante": v_label,
-            "Dir. Ré (°)": round(dir_re, 8),
-            "Dir. Vante (°)": round(dir_vante, 8),
-            "Ângulo Zenital (°)": round(zenith_measured, 8),
-            "Dist. Inclinada (m)": round(d_inc_measured, 3)
+            "Dir. Ré (°)": round(dir_re, 7),
+            "Dir. Vante (°)": round(dir_vante, 7),
+            "Ângulo Zenital (°)": round(zenith_measured, 7),
+            "Dist. Inclinada (m)": round(d_inc_measured, 4)
         })
 
     # Process Radiation Points if provided
@@ -189,10 +256,10 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
                 "Estação": s_label,
                 "Ré": re_label,
                 "Vante": v_label,
-                "Dir. Ré (°)": round(dir_re, 8),
-                "Dir. Vante (°)": round(dir_vante, 8),
-                "Ângulo Zenital (°)": round(zenith_measured, 8),
-                "Dist. Inclinada (m)": round(d_inc_measured, 3)
+                "Dir. Ré (°)": round(dir_re, 7),
+                "Dir. Vante (°)": round(dir_vante, 7),
+                "Ângulo Zenital (°)": round(zenith_measured, 7),
+                "Dist. Inclinada (m)": round(d_inc_measured, 4)
             })
 
     return pd.DataFrame(observations)
@@ -202,9 +269,9 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
     Strict calculation workflow for Linked and Closed traverses, including radiation points.
     """
     pre = df.copy()
-    pre["Ângulo Horiz. (°)"] = ((pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360).round(8)
-    pre["Dist. Horizontal (m)"] = pre["Dist. Inclinada (m)"] * np.sin(np.radians(pre["Ângulo Zenital (°)"]))
-    pre["ΔH (m)"] = pre["Dist. Inclinada (m)"] * np.cos(np.radians(pre["Ângulo Zenital (°)"]))
+    pre["Ângulo Horiz. (°)"] = ((pre["Dir. Vante (°)"] - pre["Dir. Ré (°)"] + 360) % 360).round(7)
+    pre["Dist. Horizontal (m)"] = (pre["Dist. Inclinada (m)"] * np.sin(np.radians(pre["Ângulo Zenital (°)"]))).round(4)
+    pre["ΔH (m)"] = (pre["Dist. Inclinada (m)"] * np.cos(np.radians(pre["Ângulo Zenital (°)"]))).round(5)
 
     # Separate main traverse setups from radiation setups
     # Main traverse stations start with HV labels or P labels.
@@ -292,9 +359,9 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
             "Estação": pre_main.iloc[i]["Estação"],
             "Ré": pre_main.iloc[i]["Ré"],
             "Vante": pre_main.iloc[i]["Vante"],
-            "Azimute Transportado (°)": round(float(propagated_azimuths[i]), 8),
-            "Correção (°)": round(float((i + 1) * corr_ang_per_station), 8),
-            "Azimute Corrigido (°)": round(float(adj_azimuths[i]), 8)
+            "Azimute Transportado (°)": round(float(propagated_azimuths[i]), 7),
+            "Correção (°)": round(float((i + 1) * corr_ang_per_station), 7),
+            "Azimute Corrigido (°)": round(float(adj_azimuths[i]), 7)
         })
     az_df = pd.DataFrame(az_data)
 
@@ -334,15 +401,22 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
 
     err_plan = np.sqrt(err_e**2 + err_n**2)
 
+    prec_denom = int(total_dist/err_plan) if err_plan > 0.001 else None
+    prec_str = f"1/{format_num(prec_denom, 0)}" if prec_denom is not None else "1/inf"
+
     errors = {
-        "Erro Angular (°)": round(float(err_ang), 5),
-        "Erro Planimétrico (m)": round(float(err_plan), 3),
+        "Erro Angular (°)": round(float(err_ang), 7),
+        "Erro Planimétrico (m)": round(float(err_plan), 4),
         "Erro Altimétrico (m)": round(float(err_z), 3),
-        "Precisão Relativa": f"1/{int(total_dist/err_plan) if err_plan > 0.001 else 'inf'}"
+        "Precisão Relativa": prec_str
     }
 
     # 6. Final Adjusted Coordinates
-    adj_coords = [raw_coords[0].copy(), raw_coords[1].copy()] # HV1, HV2
+    hv1_adj = raw_coords[0].copy()
+    hv1_adj["Correção E"], hv1_adj["Correção N"], hv1_adj["Correção Z"] = 0.0, 0.0, 0.0
+    hv2_adj = raw_coords[1].copy()
+    hv2_adj["Correção E"], hv2_adj["Correção N"], hv2_adj["Correção Z"] = 0.0, 0.0, 0.0
+    adj_coords = [hv1_adj, hv2_adj]
     # Apply Bowditch to P1...HV4
     cum_dist = 0
     for i in range(n_setups - 1):
@@ -352,9 +426,9 @@ def process_traverse_data(df, start_coords, hv2_coords, survey_type="Closed", en
         corr_z = -err_z * (cum_dist / total_dist)
 
         pt = raw_coords[i+2].copy()
-        pt["Correção E"] = round(corr_e, 3)
-        pt["Correção N"] = round(corr_n, 3)
-        pt["Correção Z"] = round(corr_z, 3)
+        pt["Correção E"] = round(corr_e, 5)
+        pt["Correção N"] = round(corr_n, 5)
+        pt["Correção Z"] = round(corr_z, 5)
         pt["E"] = round(pt["E"] + corr_e, 3)
         pt["N"] = round(pt["N"] + corr_n, 3)
         pt["Z"] = round(pt["Z"] + corr_z, 3)
@@ -461,10 +535,10 @@ def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start
             obs = {
                 "Estação": f"E{i}",
                 "Ponto": f"P{i+1}",
-                "V. Ré (m)": round(bs, 3),
+                "V. Ré (m)": round(bs, 4),
                 "AI (m)": round(ai, 3),
-                "V. Vante (m)": round(fs, 3),
-                "Dist (m)": round(dist, 1),
+                "V. Vante (m)": round(fs, 4),
+                "Dist (m)": round(dist, 4),
                 "Método": method
             }
             observations.append(obs)
@@ -474,8 +548,8 @@ def simulate_leveling(n_points, type="Geometric", method="visadas iguais", start
             observations.append({
                 "De": f"P{i}",
                 "Para": f"P{i+1}",
-                "Dist. Inclinada (m)": round(slope_dist, 3),
-                "Ângulo Vertical (deg)": round(vert_angle, 8),
+                "Dist. Inclinada (m)": round(slope_dist, 4),
+                "Ângulo Vertical (deg)": round(vert_angle, 7),
                 "Alt. Instrumento (m)": 1.500,
                 "Alt. Sinal (m)": 1.500
             })
@@ -486,19 +560,19 @@ def get_rod_reading_visual(value):
     """
     Returns an ASCII representation of a topographical rod.
     """
-    v = round(value, 3)
+    v = round(value, 4)
     v_cm = int(v * 100)
     mm_part = int(round((v * 100 - v_cm) * 10))
 
     lines = []
-    lines.append(f"   MIRA (Leitura: {v:.3f}m)")
+    lines.append(f"   MIRA (Leitura: {format_num(v, 4)}m)")
     lines.append("   +----------+")
     for cm in range(v_cm + 5, v_cm - 6, -1):
         m_val = cm / 100.0
         pattern = "#####     " if cm % 2 == 0 else "     #####"
         pointer = ">" if cm == v_cm else " "
         mm_label = f" [+{mm_part}mm]" if cm == v_cm else ""
-        lines.append(f"{m_val:5.2f} |{pattern}| {pointer}{mm_label}")
+        lines.append(f"{format_num(m_val, 2):>7} |{pattern}| {pointer}{mm_label}")
     lines.append("   +----------+")
     lines.append("   (Intervalos de 1cm)")
     return "\n".join(lines)
