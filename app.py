@@ -21,6 +21,8 @@ if 'map_zoom' not in st.session_state:
     st.session_state.map_zoom = 16
 if 'map_center_coord' not in st.session_state:
     st.session_state.map_center_coord = [-25.4484, -49.2310]
+if 'dev_mode' not in st.session_state:
+    st.session_state.dev_mode = False
 
 def reset_survey():
     st.session_state.survey_points = []
@@ -32,6 +34,19 @@ st.title("🏗️ Simulador de Levantamentos Topográficos")
 
 # --- Sidebar ---
 st.sidebar.header("Configurações do Levantamento")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔒 Acesso Desenvolvedor")
+pwd_input = st.sidebar.text_input("Senha do Desenvolvedor", type="password", key="dev_password_input")
+if pwd_input == "Ursula2020":
+    st.session_state.dev_mode = True
+    st.sidebar.success("Modo Desenvolvedor Ativo")
+else:
+    st.session_state.dev_mode = False
+    if pwd_input:
+        st.sidebar.error("Senha incorreta")
+
+st.sidebar.markdown("---")
 
 survey_category = st.sidebar.selectbox(
     "1. Tipo de Levantamento",
@@ -418,64 +433,70 @@ if st.session_state.survey_data is not None:
     st.write("---")
     if survey_category == "Poligonação":
         st.subheader("🌐 Resultados da Poligonação (UTM)")
-        end_cs = (e_hv_end1, n_hv_end1, 100.0) if e_hv_end1 else None
-        end_ce = (e_hv_end2, n_hv_end2, 100.0) if e_hv_end2 else None
+        if st.session_state.dev_mode:
+            end_cs = (e_hv_end1, n_hv_end1, 100.0) if e_hv_end1 else None
+            end_ce = (e_hv_end2, n_hv_end2, 100.0) if e_hv_end2 else None
 
-        pre, az_df, raw, errs, adj = simulator.process_traverse_data(
-            st.session_state.survey_data, (e1, n1, 100.0), (e_hv2, n_hv2, 100.0),
-            survey_type="Closed" if survey_type == "Fechada" else "Linked",
-            end_coords_start=end_cs, end_coords_end=end_ce
-        )
+            pre, az_df, raw, errs, adj = simulator.process_traverse_data(
+                st.session_state.survey_data, (e1, n1, 100.0), (e_hv2, n_hv2, 100.0),
+                survey_type="Closed" if survey_type == "Fechada" else "Linked",
+                end_coords_start=end_cs, end_coords_end=end_ce
+            )
 
-        t1, t2, t3, t4, t5, t6 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "🧭 Azimutes Transportados", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
-        with t1: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
-        with t2:
-            if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(simulator.format_df_for_display(pre), use_container_width=True)
-        with t3:
-            if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(simulator.format_df_for_display(az_df), use_container_width=True)
-        with t4:
-            if challenge_mode: st.info("Modo Desafio Ativo.")
-            else: st.dataframe(simulator.format_df_for_display(raw), use_container_width=True)
-        with t5:
-            if challenge_mode:
-                uea = st.number_input("Erro Angular (°)", format="%.7f")
-                uep = st.number_input("Erro Planimétrico (m)", format="%.4f")
-                if st.button("Verificar Erros"):
-                    if abs(uea - errs['Erro Angular (°)']) < 0.0001 and abs(uep - errs['Erro Planimétrico (m)']) < 0.01:
-                        st.success("Correto!")
-                    else: st.error("Divergência nos cálculos.")
-            else:
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Erro Angular", f"{simulator.format_num(errs['Erro Angular (°)'], 7)}°")
-                c2.metric("Erro Planimétrico", f"{simulator.format_num(errs['Erro Planimétrico (m)'], 4)} m")
-                c3.metric("Precisão", errs['Precisão Relativa'])
-        with t6:
-            if challenge_mode:
-                last_label = adj.iloc[-1]['Ponto']
-                uef = st.number_input(f"Este Final ({last_label})", format="%.3f")
-                unf = st.number_input(f"Norte Final ({last_label})", format="%.3f")
-                if st.button("Verificar Finais"):
-                    if abs(uef-adj.iloc[-1]['E']) < 0.01 and abs(unf-adj.iloc[-1]['N']) < 0.01:
-                        st.success("Correto!")
-                    else: st.error("Divergência.")
-            else:
-                final_cols = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
-                st.dataframe(simulator.format_df_for_display(adj[final_cols]), use_container_width=True)
+            t1, t2, t3, t4, t5, t6 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "🧭 Azimutes Transportados", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
+            with t1: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
+            with t2:
+                if challenge_mode: st.info("Modo Desafio Ativo.")
+                else: st.dataframe(simulator.format_df_for_display(pre), use_container_width=True)
+            with t3:
+                if challenge_mode: st.info("Modo Desafio Ativo.")
+                else: st.dataframe(simulator.format_df_for_display(az_df), use_container_width=True)
+            with t4:
+                if challenge_mode: st.info("Modo Desafio Ativo.")
+                else: st.dataframe(simulator.format_df_for_display(raw), use_container_width=True)
+            with t5:
+                if challenge_mode:
+                    uea = st.number_input("Erro Angular (°)", format="%.7f")
+                    uep = st.number_input("Erro Planimétrico (m)", format="%.4f")
+                    if st.button("Verificar Erros"):
+                        if abs(uea - errs['Erro Angular (°)']) < 0.0001 and abs(uep - errs['Erro Planimétrico (m)']) < 0.01:
+                            st.success("Correto!")
+                        else: st.error("Divergência nos cálculos.")
+                else:
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Erro Angular", f"{simulator.format_num(errs['Erro Angular (°)'], 7)}°")
+                    c2.metric("Erro Planimétrico", f"{simulator.format_num(errs['Erro Planimétrico (m)'], 4)} m")
+                    c3.metric("Precisão", errs['Precisão Relativa'])
+            with t6:
+                if challenge_mode:
+                    last_label = adj.iloc[-1]['Ponto']
+                    uef = st.number_input(f"Este Final ({last_label})", format="%.3f")
+                    unf = st.number_input(f"Norte Final ({last_label})", format="%.3f")
+                    if st.button("Verificar Finais"):
+                        if abs(uef-adj.iloc[-1]['E']) < 0.01 and abs(unf-adj.iloc[-1]['N']) < 0.01:
+                            st.success("Correto!")
+                        else: st.error("Divergência.")
+                else:
+                    final_cols = ["Ponto", "Correção E", "Correção N", "Correção Z", "E", "N", "Z"]
+                    st.dataframe(simulator.format_df_for_display(adj[final_cols]), use_container_width=True)
+        else:
+            st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
     else: # Nivelamento
         st.subheader("📐 Resultados do Nivelamento")
-        if not challenge_mode: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
-        if survey_type == "Geométrico":
-            st.header("🔍 Leitura de Réguas")
-            sel = st.selectbox("Estação", range(len(st.session_state.survey_data)))
-            r = st.session_state.survey_data.iloc[sel]
-            c1, c2 = st.columns(2)
-            with c1: st.write("Ré"); st.code(simulator.get_rod_reading_visual(r['V. Ré (m)']))
-            with c2: st.write("Vante"); st.code(simulator.get_rod_reading_visual(r['V. Vante (m)']))
-        st.header("🧮 Validação")
-        uevs = [st.number_input(f"Cota P{i+1}", format="%.3f", key=f"lev_{i}") for i in range(len(st.session_state.survey_points))]
-        if st.button("Verificar Cotas"):
-            err = np.mean([abs(u - c) for u, c in zip(uevs, st.session_state.true_elevations)])
-            if err < 0.005: st.success(f"Correto! Erro: {simulator.format_num(err, 4)}m")
-            else: st.error(f"Divergência. Erro: {simulator.format_num(err, 4)}m")
+        if st.session_state.dev_mode:
+            if not challenge_mode: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
+            if survey_type == "Geométrico":
+                st.header("🔍 Leitura de Réguas")
+                sel = st.selectbox("Estação", range(len(st.session_state.survey_data)))
+                r = st.session_state.survey_data.iloc[sel]
+                c1, c2 = st.columns(2)
+                with c1: st.write("Ré"); st.code(simulator.get_rod_reading_visual(r['V. Ré (m)']))
+                with c2: st.write("Vante"); st.code(simulator.get_rod_reading_visual(r['V. Vante (m)']))
+            st.header("🧮 Validação")
+            uevs = [st.number_input(f"Cota P{i+1}", format="%.3f", key=f"lev_{i}") for i in range(len(st.session_state.survey_points))]
+            if st.button("Verificar Cotas"):
+                err = np.mean([abs(u - c) for u, c in zip(uevs, st.session_state.true_elevations)])
+                if err < 0.005: st.success(f"Correto! Erro: {simulator.format_num(err, 4)}m")
+                else: st.error(f"Divergência. Erro: {simulator.format_num(err, 4)}m")
+        else:
+            st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
