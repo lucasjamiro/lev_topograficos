@@ -19,8 +19,12 @@ if 'survey_data' not in st.session_state:
     st.session_state.survey_data = None
 if 'map_zoom' not in st.session_state:
     st.session_state.map_zoom = 16
+if 'map_center' not in st.session_state:
+    st.session_state.map_center = [-25.4484, -49.2310]
 if 'map_center_coord' not in st.session_state:
-    st.session_state.map_center_coord = [-25.4484, -49.2310]
+    st.session_state.map_center_coord = st.session_state.map_center
+if 'dev_authenticated' not in st.session_state:
+    st.session_state.dev_authenticated = False
 if 'dev_mode' not in st.session_state:
     st.session_state.dev_mode = False
 
@@ -37,14 +41,27 @@ st.sidebar.header("Configurações do Levantamento")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔒 Acesso Desenvolvedor")
-pwd_input = st.sidebar.text_input("Senha do Desenvolvedor", type="password", key="dev_password_input")
-if pwd_input == "Ursula2020":
-    st.session_state.dev_mode = True
-    st.sidebar.success("Modo Desenvolvedor Ativo")
-else:
-    st.session_state.dev_mode = False
+if not st.session_state.dev_authenticated:
+    pwd_input = st.sidebar.text_input("Senha do Desenvolvedor", type="password", key="dev_password_input")
     if pwd_input:
-        st.sidebar.error("Senha incorreta")
+        if pwd_input == "Ursula2020":
+            st.session_state.dev_authenticated = True
+            st.session_state.dev_mode = True
+            st.sidebar.success("Autenticado com sucesso!")
+            st.rerun()
+        else:
+            st.sidebar.error("Senha incorreta")
+            st.session_state.dev_mode = False
+    else:
+        st.session_state.dev_mode = False
+else:
+    st.sidebar.success("Autenticado como Desenvolvedor")
+    dev_toggle = st.sidebar.toggle("🛠️ Modo Desenvolvedor", value=st.session_state.dev_mode, key="dev_mode_toggle_widget")
+    st.session_state.dev_mode = dev_toggle
+    if st.sidebar.button("Sair (Logout)", key="dev_logout_btn"):
+        st.session_state.dev_authenticated = False
+        st.session_state.dev_mode = False
+        st.rerun()
 
 st.sidebar.markdown("---")
 
@@ -140,7 +157,8 @@ if survey_category == "Poligonação":
             points.append((float(l4[0]), float(l4[1])))
             points.append((float(l5[0]), float(l5[1])))
         st.session_state.survey_points = points
-        st.session_state.map_center_coord = [float(l1[0]), float(l1[1])]
+        st.session_state.map_center = [float(l1[0]), float(l1[1])]
+        st.session_state.map_center_coord = st.session_state.map_center
         st.rerun()
 
     if col_b2.button("Aleatório"):
@@ -233,9 +251,13 @@ with col_map:
         new_center = map_data.get("center")
         if new_center:
             if isinstance(new_center, dict) and "lat" in new_center and "lng" in new_center:
-                st.session_state.map_center_coord = [float(new_center["lat"]), float(new_center["lng"])]
+                center_val = [float(new_center["lat"]), float(new_center["lng"])]
+                st.session_state.map_center = center_val
+                st.session_state.map_center_coord = center_val
             elif isinstance(new_center, (list, tuple)) and len(new_center) >= 2:
-                st.session_state.map_center_coord = [float(new_center[0]), float(new_center[1])]
+                center_val = [float(new_center[0]), float(new_center[1])]
+                st.session_state.map_center = center_val
+                st.session_state.map_center_coord = center_val
 
         new_zoom = map_data.get("zoom")
         if new_zoom:
@@ -306,7 +328,6 @@ with col_data:
                     new_pts.append((nl, nln))
                 except: new_pts.append(st.session_state.survey_points[idx])
             st.session_state.survey_points = new_pts
-            st.rerun()
 
         # Section for Radiation Points
         if survey_category == "Poligonação":
@@ -388,7 +409,6 @@ with col_data:
                                 're': auto_re
                             })
                         st.session_state.radiation_points = updated_rads
-                        st.rerun()
 
         if st.session_state.map_locked:
             st.info("🔒 Traçado e irradiações bloqueados.")
