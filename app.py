@@ -253,6 +253,8 @@ if survey_category == "Poligonação" and st.session_state.radiation_points:
             if st_idx < len(st.session_state.survey_points):
                 st_lat, st_lon = st.session_state.survey_points[st_idx]
                 radiation_lines.append({
+                    'station': rad['station'],
+                    'rad_index': idx_r,
                     'start': [float(st_lat), float(st_lon)],
                     'end': [rad_lat, rad_lon]
                 })
@@ -272,6 +274,7 @@ with col_map:
         traverse_lines=[[float(pt[0]), float(pt[1])] for pt in line_points],
         radiation_lines=radiation_lines,
         dash_traverse=(survey_category == "Poligonação"),
+        is_closed=(survey_category == "Poligonação" and survey_type == "Fechada"),
         locked=st.session_state.map_locked,
         center=st.session_state.map_center_coord,
         zoom=st.session_state.map_zoom,
@@ -315,7 +318,6 @@ with col_map:
                         elif idx == max_pts - 1:
                             st.session_state.e_hv5_input = round(float(e), 3)
                             st.session_state.n_hv5_input = round(float(n), 3)
-                    st.rerun()
 
                 elif cat == "radiation" and 0 <= idx < len(st.session_state.radiation_points):
                     e_pt, n_pt, _, _ = utm.from_latlon(n_lat, n_lon)
@@ -323,7 +325,6 @@ with col_map:
                     st.session_state.radiation_points[idx]['lon'] = n_lon
                     st.session_state.radiation_points[idx]['e'] = round(float(e_pt), 3)
                     st.session_state.radiation_points[idx]['n'] = round(float(n_pt), 3)
-                    st.rerun()
 
         elif event_type == "map_clicked" and not st.session_state.map_locked:
             clicked_data = map_event.get("clicked")
@@ -332,7 +333,6 @@ with col_map:
                 if len(st.session_state.survey_points) < max_pts:
                     if clicked not in st.session_state.survey_points:
                         st.session_state.survey_points.append(clicked)
-                        st.rerun()
                 elif survey_category == "Poligonação":
                     existing_rad_coords = [(r['lat'], r['lon']) for r in st.session_state.radiation_points]
                     if clicked not in existing_rad_coords and clicked not in st.session_state.survey_points:
@@ -349,7 +349,6 @@ with col_map:
                             'station': def_station,
                             're': def_re
                         })
-                        st.rerun()
 
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
