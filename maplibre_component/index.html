@@ -7,6 +7,10 @@
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <style>
+    :root {
+      --marker-label-size: 14px;
+    }
+
     html, body, #map {
       margin: 0;
       padding: 0;
@@ -86,12 +90,11 @@
       white-space: nowrap;
       pointer-events: none;
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-      transition: font-size 0.1s ease;
+      font-size: var(--marker-label-size);
       z-index: 10;
     }
 
     .svg-marker {
-      filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.3));
       display: block;
     }
   </style>
@@ -119,9 +122,15 @@
       sendMessageToStreamlit("streamlit:setFrameHeight", { height: height || 500 });
     }
 
-    // Map Styles
-    const BASE_STYLES = {
-      streets: {
+    // Base Map Layers and Sources Configuration
+    const LAYER_MAP = {
+      streets: 'osm-layer',
+      satellite: 'satellite-layer',
+      vector: 'vector-layer'
+    };
+
+    function getCombinedStyle(activeStyle) {
+      return {
         version: 8,
         sources: {
           'osm-tiles': {
@@ -129,25 +138,13 @@
             tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
             tileSize: 256,
             attribution: '&copy; OpenStreetMap contributors'
-          }
-        },
-        layers: [{ id: 'osm-layer', type: 'raster', source: 'osm-tiles', minzoom: 0, maxzoom: 19 }]
-      },
-      satellite: {
-        version: 8,
-        sources: {
+          },
           'esri-satellite': {
             type: 'raster',
             tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
             tileSize: 256,
             attribution: 'Tiles &copy; Esri'
-          }
-        },
-        layers: [{ id: 'satellite-layer', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 19 }]
-      },
-      vector: {
-        version: 8,
-        sources: {
+          },
           'carto-positron': {
             type: 'raster',
             tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
@@ -155,9 +152,34 @@
             attribution: '&copy; CARTO &copy; OpenStreetMap'
           }
         },
-        layers: [{ id: 'vector-layer', type: 'raster', source: 'carto-positron', minzoom: 0, maxzoom: 19 }]
-      }
-    };
+        layers: [
+          {
+            id: 'osm-layer',
+            type: 'raster',
+            source: 'osm-tiles',
+            minzoom: 0,
+            maxzoom: 19,
+            layout: { visibility: activeStyle === 'streets' ? 'visible' : 'none' }
+          },
+          {
+            id: 'satellite-layer',
+            type: 'raster',
+            source: 'esri-satellite',
+            minzoom: 0,
+            maxzoom: 19,
+            layout: { visibility: activeStyle === 'satellite' ? 'visible' : 'none' }
+          },
+          {
+            id: 'vector-layer',
+            type: 'raster',
+            source: 'carto-positron',
+            minzoom: 0,
+            maxzoom: 19,
+            layout: { visibility: activeStyle === 'vector' ? 'visible' : 'none' }
+          }
+        ]
+      };
+    }
 
     let map = null;
     let markers = [];
@@ -206,17 +228,13 @@
 
     function updateLabelScales() {
       if (!map) return;
-      const zoom = map.getZoom();
-      const fontSize = calculateLabelFontSize(zoom);
-      const labels = document.querySelectorAll('.marker-label');
-      labels.forEach(el => {
-        el.style.fontSize = fontSize;
-      });
+      const fontSize = calculateLabelFontSize(map.getZoom());
+      document.documentElement.style.setProperty('--marker-label-size', fontSize);
     }
 
     function setBaseLayer(styleName) {
-      if (!map || !BASE_STYLES[styleName]) return;
-      if (currentStyle === styleName && map.getStyle()) return;
+      if (!map || !LAYER_MAP[styleName]) return;
+      if (currentStyle === styleName) return;
 
       currentStyle = styleName;
 
@@ -228,10 +246,11 @@
         }
       });
 
-      map.setStyle(BASE_STYLES[styleName]);
-
-      map.once('style.load', () => {
-        renderPolylines();
+      Object.keys(LAYER_MAP).forEach(name => {
+        const layerId = LAYER_MAP[name];
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', name === styleName ? 'visible' : 'none');
+        }
       });
 
       sendStateUpdate('layer_changed', { current_layer: styleName });
@@ -434,7 +453,7 @@
           el.className = 'custom-marker-wrapper' + (!isLocked ? ' draggable' : '');
 
           const iconHTML = getSVGIcon(pt.shape, pt.color);
-          const labelHTML = `<div class="marker-label" style="font-size: ${calculateLabelFontSize(map.getZoom())}">${pt.label}</div>`;
+          const labelHTML = `<div class="marker-label">${pt.label}</div>`;
           el.innerHTML = iconHTML + labelHTML;
 
           const marker = new maplibregl.Marker({
@@ -488,7 +507,7 @@
 
       map = new maplibregl.Map({
         container: 'map',
-        style: BASE_STYLES[currentStyle],
+        style: getCombinedStyle(currentStyle),
         center: [center[1], center[0]],
         zoom: zoom,
         attributionControl: true
@@ -526,7 +545,7 @@
       currentProps = props;
 
       // Update layer if changed externally
-      if (props.current_layer && props.current_layer !== currentStyle && BASE_STYLES[props.current_layer]) {
+      if (props.current_layer && props.current_layer !== currentStyle && LAYER_MAP[props.current_layer]) {
         setBaseLayer(props.current_layer);
       }
 
