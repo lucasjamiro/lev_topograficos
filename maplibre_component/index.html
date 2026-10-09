@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MapLibre Streamlit Component</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+  <style>
+    html, body, #map {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* Custom layer switcher control */
+    .layer-switcher {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 6px 10px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      font-size: 12px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .layer-switcher button {
+      border: 1px solid #ccc;
+      background: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      color: #333;
+    }
+
+    .layer-switcher button:hover {
+      background: #f0f0f0;
+    }
+
+    .layer-switcher button.active {
+      background: #007bff;
+      color: white;
+      border-color: #0056b3;
+    }
+
+    /* Marker Element Container */
+    .custom-marker-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .custom-marker-wrapper.draggable {
+      cursor: grab;
+    }
+
+    .custom-marker-wrapper.draggable:active {
+      cursor: grabbing;
+    }
+
+    .marker-label {
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(0,0,0,0.2);
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-weight: bold;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      margin-top: 2px;
+      transition: font-size 0.1s ease;
+    }
+
+    .svg-marker {
+      filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.3));
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="layer-switcher" id="layerSwitcher">
+    <button id="btn-streets" class="active" onclick="setBaseLayer('streets')">Rua (OSM)</button>
+    <button id="btn-satellite" onclick="setBaseLayer('satellite')">Satélite</button>
+    <button id="btn-vector" onclick="setBaseLayer('vector')">Vetor Clean</button>
+  </div>
+
+  <script>
+    // Streamlit Component Protocol Handlers
+    function sendMessageToStreamlit(type, data) {
+      var outData = Object.assign({ isStreamlitMessage: true, type: type }, data);
+      window.parent.postMessage(outData, "*");
+    }
+
+    function setComponentValue(value) {
+      sendMessageToStreamlit("streamlit:setComponentValue", { value: value });
+    }
+
+    function setFrameHeight(height) {
+      sendMessageToStreamlit("streamlit:setFrameHeight", { height: height || 500 });
+    }
+
+    // Map Styles
+    const BASE_STYLES = {
+      streets: {
+        version: 8,
+        sources: {
+          'osm-tiles': {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '&copy; OpenStreetMap contributors'
+          }
+        },
+        layers: [{ id: 'osm-layer', type: 'raster', source: 'osm-tiles', minzoom: 0, maxzoom: 19 }]
+      },
+      satellite: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256,
+            attribution: 'Tiles &copy; Esri'
+          }
+        },
+        layers: [{ id: 'satellite-layer', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 19 }]
+      },
+      vector: {
+        version: 8,
+        sources: {
+          'carto-positron': {
+            type: 'raster',
+            tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '&copy; CARTO &copy; OpenStreetMap'
+          }
+        },
+        layers: [{ id: 'vector-layer', type: 'raster', source: 'carto-positron', minzoom: 0, maxzoom: 19 }]
+      }
+    };
+
+    let map = null;
+    let markers = [];
+    let currentStyle = 'streets';
+    let currentProps = null;
+
+    function getSVGIcon(shape, color) {
+      const hexColor = color === 'red' ? '#e74c3c' : (color === 'green' ? '#2ecc71' : '#3498db');
+      if (shape === 'triangle') {
+        return `<svg class="svg-marker" width="24" height="24" viewBox="0 0 24 24">
+                  <polygon points="12,2 22,21 2,21" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+                </svg>`;
+      } else if (shape === 'square') {
+        return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
+                  <rect x="2" y="2" width="16" height="16" rx="2" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+                </svg>`;
+      } else {
+        // Circle
+        return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="8" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+                </svg>`;
+      }
+    }
+
+    function calculateLabelFontSize(zoom) {
+      // Inverse scaling or smooth scaling formula:
+      // High zoom level (e.g. 18-20) -> legible, moderate font size (11-12px)
+      // Low zoom level (e.g. 10-14) -> proportional, readable font size
+      // We clamp so font size stays cleanly legible without becoming gigantically oversized.
+      const baseSize = 12;
+      const zoomFactor = (16 - zoom) * 0.8;
+      let size = baseSize + zoomFactor;
+      if (size < 9) size = 9;
+      if (size > 16) size = 16;
+      return size + 'px';
+    }
+
+    function updateLabelScales() {
+      if (!map) return;
+      const zoom = map.getZoom();
+      const fontSize = calculateLabelFontSize(zoom);
+      const labels = document.querySelectorAll('.marker-label');
+      labels.forEach(el => {
+        el.style.fontSize = fontSize;
+      });
+    }
+
+    function setBaseLayer(styleName) {
+      if (!map || !BASE_STYLES[styleName]) return;
+      currentStyle = styleName;
+
+      ['streets', 'satellite', 'vector'].forEach(name => {
+        const btn = document.getElementById('btn-' + name);
+        if (btn) {
+          if (name === styleName) btn.classList.add('active');
+          else btn.classList.remove('active');
+        }
+      });
+
+      map.setStyle(BASE_STYLES[styleName]);
+
+      // When style reloads, re-add polyline sources and layers
+      map.once('style.load', () => {
+        renderPolylines();
+      });
+
+      sendStateUpdate('layer_changed', { current_layer: styleName });
+    }
+
+    function sendStateUpdate(eventType, extraData = {}) {
+      if (!map) return;
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      const payload = Object.assign({
+        event: eventType,
+        center: [center.lat, center.lng],
+        zoom: zoom,
+        current_layer: currentStyle
+      }, extraData);
+      setComponentValue(payload);
+    }
+
+    function renderPolylines() {
+      if (!map || !currentProps) return;
+
+      // Remove existing polyline layers and sources
+      if (map.getLayer('traverse-line')) map.removeLayer('traverse-line');
+      if (map.getSource('traverse-line-src')) map.removeSource('traverse-line-src');
+
+      if (map.getLayer('radiation-lines')) map.removeLayer('radiation-lines');
+      if (map.getSource('radiation-lines-src')) map.removeSource('radiation-lines-src');
+
+      // 1. Traverse Line
+      if (currentProps.traverse_lines && currentProps.traverse_lines.length > 1) {
+        // traverse_lines is array of [lat, lon]
+        const coords = currentProps.traverse_lines.map(p => [p[1], p[0]]); // [lon, lat]
+        map.addSource('traverse-line-src', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: coords
+            }
+          }
+        });
+        map.addLayer({
+          id: 'traverse-line',
+          type: 'line',
+          source: 'traverse-line-src',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': '#2563eb',
+            'line-width': 3,
+            'line-dasharray': currentProps.dash_traverse ? [2, 2] : [1, 0]
+          }
+        });
+      }
+
+      // 2. Radiation Lines
+      if (currentProps.radiation_lines && currentProps.radiation_lines.length > 0) {
+        const features = currentProps.radiation_lines.map(line => {
+          return {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[line.start[1], line.start[0]], [line.end[1], line.end[0]]]
+            }
+          };
+        });
+
+        map.addSource('radiation-lines-src', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: features
+          }
+        });
+
+        map.addLayer({
+          id: 'radiation-lines',
+          type: 'line',
+          source: 'radiation-lines-src',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': '#16a34a',
+            'line-width': 2,
+            'line-dasharray': [2, 2]
+          }
+        });
+      }
+    }
+
+    function renderMarkers() {
+      // Clear old markers
+      markers.forEach(m => m.remove());
+      markers = [];
+
+      if (!currentProps || !currentProps.points) return;
+
+      const isLocked = currentProps.locked || false;
+
+      currentProps.points.forEach((pt, index) => {
+        // pt format: { label, lat, lon, color, shape, category: 'survey'|'radiation'|'control', index }
+        const el = document.createElement('div');
+        el.className = 'custom-marker-wrapper' + (!isLocked ? ' draggable' : '');
+
+        const iconHTML = getSVGIcon(pt.shape, pt.color);
+        const labelHTML = `<div class="marker-label" style="font-size: ${calculateLabelFontSize(map.getZoom())}">${pt.label}</div>`;
+        el.innerHTML = iconHTML + labelHTML;
+
+        const marker = new maplibregl.Marker({
+          element: el,
+          draggable: !isLocked,
+          anchor: 'center'
+        })
+        .setLngLat([pt.lon, pt.lat])
+        .addTo(map);
+
+        if (!isLocked) {
+          marker.on('dragend', () => {
+            const lngLat = marker.getLngLat();
+            sendStateUpdate('point_dragged', {
+              dragged_point: {
+                category: pt.category,
+                index: pt.index,
+                label: pt.label,
+                lat: lngLat.lat,
+                lon: lngLat.lng
+              }
+            });
+          });
+        }
+
+        markers.push(marker);
+      });
+    }
+
+    function initializeMap(props) {
+      currentProps = props;
+      currentStyle = props.current_layer || 'streets';
+
+      const center = props.center || [-25.4484, -49.2310];
+      const zoom = props.zoom || 16;
+
+      map = new maplibregl.Map({
+        container: 'map',
+        style: BASE_STYLES[currentStyle],
+        center: [center[1], center[0]], // [lon, lat]
+        zoom: zoom,
+        attributionControl: true
+      });
+
+      map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+
+      map.on('load', () => {
+        renderPolylines();
+        renderMarkers();
+        updateLabelScales();
+        setFrameHeight(props.height || 500);
+      });
+
+      map.on('zoom', () => {
+        updateLabelScales();
+      });
+
+      map.on('moveend', () => {
+        sendStateUpdate('viewport_changed');
+      });
+
+      map.on('click', (e) => {
+        if (currentProps.locked) return;
+        sendStateUpdate('map_clicked', {
+          clicked: {
+            lat: e.lngLat.lat,
+            lng: e.lngLat.lng
+          }
+        });
+      });
+    }
+
+    function updateMap(props) {
+      currentProps = props;
+
+      // Update layer if changed externally
+      if (props.current_layer && props.current_layer !== currentStyle && BASE_STYLES[props.current_layer]) {
+        setBaseLayer(props.current_layer);
+      }
+
+      // Sync viewport if provided and significantly different
+      if (props.center && map) {
+        const curCenter = map.getCenter();
+        const latDiff = Math.abs(curCenter.lat - props.center[0]);
+        const lonDiff = Math.abs(curCenter.lng - props.center[1]);
+        if (latDiff > 0.00001 || lonDiff > 0.00001) {
+          map.setCenter([props.center[1], props.center[0]]);
+        }
+      }
+
+      if (props.zoom && map && Math.abs(map.getZoom() - props.zoom) > 0.1) {
+        map.setZoom(props.zoom);
+      }
+
+      if (map.isStyleLoaded()) {
+        renderPolylines();
+      }
+      renderMarkers();
+      updateLabelScales();
+    }
+
+    // Streamlit Render Listener
+    function onDataFromPython(event) {
+      if (event.data.type === "streamlit:render") {
+        const props = event.data.args;
+        if (!map) {
+          initializeMap(props);
+        } else {
+          updateMap(props);
+        }
+      }
+    }
+
+    window.addEventListener("message", onDataFromPython);
+    sendMessageToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+  </script>
+</body>
+</html>
