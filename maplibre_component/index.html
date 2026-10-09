@@ -99,9 +99,9 @@
 <body>
   <div id="map"></div>
   <div class="layer-switcher" id="layerSwitcher">
-    <button id="btn-streets" class="active" onclick="setBaseLayer('streets')">Rua (OSM)</button>
-    <button id="btn-satellite" onclick="setBaseLayer('satellite')">Satélite</button>
-    <button id="btn-vector" onclick="setBaseLayer('vector')">Vetor Clean</button>
+    <button id="btn-streets" class="active" onclick="setBaseLayer('streets', true)">Rua (OSM)</button>
+    <button id="btn-satellite" onclick="setBaseLayer('satellite', true)">Satélite</button>
+    <button id="btn-vector" onclick="setBaseLayer('vector', true)">Vetor Clean</button>
   </div>
 
   <script>
@@ -164,33 +164,35 @@
     let currentStyle = 'streets';
     let currentProps = null;
     let lastSentState = { center: null, zoom: null, current_layer: null };
+    let isProgrammaticChange = false;
 
     function getSVGIcon(shape, color) {
-      let strokeColor = '#3498db';
-      let fillColor = 'rgba(52, 152, 219, 0.2)';
+      let strokeColor = '#2563eb';
+      let fillColor = 'rgba(255, 255, 255, 0.85)';
       if (color === 'red') {
         strokeColor = '#dc2626';
-        fillColor = 'rgba(220, 38, 38, 0.18)';
       } else if (color === 'green') {
         strokeColor = '#16a34a';
-        fillColor = 'rgba(22, 163, 74, 0.18)';
       } else if (color === 'blue') {
         strokeColor = '#2563eb';
-        fillColor = 'rgba(37, 99, 235, 0.18)';
       }
+      const dotColor = strokeColor;
 
       if (shape === 'triangle') {
         return `<svg class="svg-marker" width="22" height="22" viewBox="0 0 22 22">
-                  <polygon points="11,2 20,19 2,19" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" stroke-linejoin="round" />
+                  <polygon points="11,2 20,19 2,19" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.2" stroke-linejoin="round" />
+                  <circle cx="11" cy="13" r="2" fill="${dotColor}" />
                 </svg>`;
       } else if (shape === 'square') {
         return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
-                  <rect x="2.5" y="2.5" width="15" height="15" rx="1.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" stroke-linejoin="round" />
+                  <rect x="2.5" y="2.5" width="15" height="15" rx="2" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.2" stroke-linejoin="round" />
+                  <circle cx="10" cy="10" r="2" fill="${dotColor}" />
                 </svg>`;
       } else {
         // Circle
         return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="7.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" />
+                  <circle cx="10" cy="10" r="7.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.2" />
+                  <circle cx="10" cy="10" r="2" fill="${dotColor}" />
                 </svg>`;
       }
     }
@@ -214,7 +216,7 @@
       });
     }
 
-    function setBaseLayer(styleName) {
+    function setBaseLayer(styleName, fromUser = false) {
       if (!map || !BASE_STYLES[styleName]) return;
       if (currentStyle === styleName && map.getStyle()) return;
 
@@ -228,38 +230,62 @@
         }
       });
 
+      isProgrammaticChange = true;
       map.setStyle(BASE_STYLES[styleName]);
 
       map.once('style.load', () => {
-        renderPolylines();
+        isProgrammaticChange = false;
+        renderPolylines(true);
+        renderMarkers();
+        updateLabelScales();
       });
 
-      sendStateUpdate('layer_changed', { current_layer: styleName });
+      if (fromUser) {
+        sendStateUpdate('layer_changed', { current_layer: styleName });
+      }
     }
 
     function sendStateUpdate(eventType, extraData = {}) {
       if (!map) return;
       const center = map.getCenter();
       const zoom = map.getZoom();
+
+      const newLat = center.lat;
+      const newLng = center.lng;
+
+      if (
+        lastSentState.center &&
+        Math.abs(lastSentState.center[0] - newLat) < 1e-6 &&
+        Math.abs(lastSentState.center[1] - newLng) < 1e-6 &&
+        Math.abs(lastSentState.zoom - zoom) < 0.01 &&
+        lastSentState.current_layer === currentStyle &&
+        eventType === 'viewport_changed'
+      ) {
+        return;
+      }
+
       lastSentState = {
-        center: [center.lat, center.lng],
+        center: [newLat, newLng],
         zoom: zoom,
         current_layer: currentStyle
       };
+
       const payload = Object.assign({
         event: eventType,
-        center: [center.lat, center.lng],
+        center: [newLat, newLng],
         zoom: zoom,
         current_layer: currentStyle
       }, extraData);
+
       setComponentValue(payload);
     }
 
     function updateLineDataFromPoints() {
-      if (!map || !currentProps || !currentProps.points) return;
+      if (!map || !map.isStyleLoaded() || !currentProps || !currentProps.points) return;
 
       // 1. Traverse Line Dynamic Update
-      if (currentProps.traverse_lines && currentProps.traverse_lines.length > 0) {
+      const travSource = map.getSource('traverse-line-src');
+      if (travSource) {
         const surveyPts = currentProps.points
           .filter(p => p.category === 'survey')
           .sort((a, b) => a.index - b.index);
@@ -271,20 +297,18 @@
           coords.push([closePt.lon, closePt.lat]);
         }
 
-        const travSource = map.getSource('traverse-line-src');
-        if (travSource) {
-          travSource.setData({
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: coords
-            }
-          });
-        }
+        travSource.setData({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: coords
+          }
+        });
       }
 
       // 2. Radiation Lines Dynamic Update
-      if (currentProps.radiation_lines && currentProps.radiation_lines.length > 0) {
+      const radSource = map.getSource('radiation-lines-src');
+      if (radSource) {
         const pointsMap = {};
         currentProps.points.forEach(p => {
           pointsMap[p.label] = p;
@@ -293,7 +317,7 @@
           }
         });
 
-        const features = currentProps.radiation_lines.map(line => {
+        const features = (currentProps.radiation_lines || []).map(line => {
           let startLon = line.start[1];
           let startLat = line.start[0];
           let endLon = line.end[1];
@@ -317,38 +341,28 @@
           };
         });
 
-        const radSource = map.getSource('radiation-lines-src');
-        if (radSource) {
-          radSource.setData({
-            type: 'FeatureCollection',
-            features: features
-          });
-        }
+        radSource.setData({
+          type: 'FeatureCollection',
+          features: features
+        });
       }
     }
 
-    function renderPolylines() {
-      if (!map || !currentProps) return;
+    function renderPolylines(forceRecreate = false) {
+      if (!map || !map.isStyleLoaded() || !currentProps) return;
 
-      if (map.getLayer('traverse-line')) map.removeLayer('traverse-line');
-      if (map.getSource('traverse-line-src')) map.removeSource('traverse-line-src');
+      const traverseExist = map.getSource('traverse-line-src') && map.getLayer('traverse-line');
+      const radExist = map.getSource('radiation-lines-src') && map.getLayer('radiation-lines');
 
-      if (map.getLayer('radiation-lines')) map.removeLayer('radiation-lines');
-      if (map.getSource('radiation-lines-src')) map.removeSource('radiation-lines-src');
+      if (forceRecreate || !traverseExist) {
+        if (map.getLayer('traverse-line')) map.removeLayer('traverse-line');
+        if (map.getSource('traverse-line-src')) map.removeSource('traverse-line-src');
 
-      // 1. Traverse Line
-      if (currentProps.traverse_lines && currentProps.traverse_lines.length > 1) {
-        const coords = currentProps.traverse_lines.map(p => [p[1], p[0]]); // [lon, lat]
         map.addSource('traverse-line-src', {
           type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: coords
-            }
-          }
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } }
         });
+
         map.addLayer({
           id: 'traverse-line',
           type: 'line',
@@ -362,24 +376,13 @@
         });
       }
 
-      // 2. Radiation Lines
-      if (currentProps.radiation_lines && currentProps.radiation_lines.length > 0) {
-        const features = currentProps.radiation_lines.map(line => {
-          return {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: [[line.start[1], line.start[0]], [line.end[1], line.end[0]]]
-            }
-          };
-        });
+      if (forceRecreate || !radExist) {
+        if (map.getLayer('radiation-lines')) map.removeLayer('radiation-lines');
+        if (map.getSource('radiation-lines-src')) map.removeSource('radiation-lines-src');
 
         map.addSource('radiation-lines-src', {
           type: 'geojson',
-          data: {
-            type: 'FeatureCollection',
-            features: features
-          }
+          data: { type: 'FeatureCollection', features: [] }
         });
 
         map.addLayer({
@@ -395,6 +398,14 @@
         });
       }
 
+      if (map.getLayer('traverse-line')) {
+        map.setPaintProperty(
+          'traverse-line',
+          'line-dasharray',
+          currentProps.dash_traverse ? [2, 2] : [1, 0]
+        );
+      }
+
       updateLineDataFromPoints();
     }
 
@@ -408,7 +419,6 @@
       const isLocked = currentProps.locked || false;
       const newPts = currentProps.points;
 
-      // Check if existing markers match newPts count and key identity
       const canUpdateInPlace = (markers.length === newPts.length) && markers.every((m, idx) => {
         return m._pointLabel === newPts[idx].label && m._pointCategory === newPts[idx].category;
       });
@@ -494,10 +504,16 @@
         attributionControl: true
       });
 
+      lastSentState = {
+        center: [center[0], center[1]],
+        zoom: zoom,
+        current_layer: currentStyle
+      };
+
       map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
       map.on('load', () => {
-        renderPolylines();
+        renderPolylines(true);
         renderMarkers();
         updateLabelScales();
         setFrameHeight(props.height || 500);
@@ -508,11 +524,15 @@
       });
 
       map.on('moveend', () => {
+        if (isProgrammaticChange) {
+          isProgrammaticChange = false;
+          return;
+        }
         sendStateUpdate('viewport_changed');
       });
 
       map.on('click', (e) => {
-        if (currentProps.locked) return;
+        if (currentProps && currentProps.locked) return;
         sendStateUpdate('map_clicked', {
           clicked: {
             lat: e.lngLat.lat,
@@ -525,12 +545,10 @@
     function updateMap(props) {
       currentProps = props;
 
-      // Update layer if changed externally
       if (props.current_layer && props.current_layer !== currentStyle && BASE_STYLES[props.current_layer]) {
-        setBaseLayer(props.current_layer);
+        setBaseLayer(props.current_layer, false);
       }
 
-      // Sync viewport if provided and significantly different from current and last sent
       if (props.center && map) {
         const curCenter = map.getCenter();
         const latDiff = Math.abs(curCenter.lat - props.center[0]);
@@ -541,6 +559,7 @@
 
         if (latDiff > 0.0001 || lonDiff > 0.0001) {
           if (lastLatDiff > 0.00005 || lastLonDiff > 0.00005) {
+            isProgrammaticChange = true;
             map.setCenter([props.center[1], props.center[0]]);
           }
         }
@@ -551,13 +570,12 @@
         const zoomDiff = Math.abs(curZoom - props.zoom);
         const lastZoomDiff = lastSentState.zoom ? Math.abs(lastSentState.zoom - props.zoom) : 1;
         if (zoomDiff > 0.2 && lastZoomDiff > 0.1) {
+          isProgrammaticChange = true;
           map.setZoom(props.zoom);
         }
       }
 
-      if (map.isStyleLoaded()) {
-        renderPolylines();
-      }
+      renderPolylines(false);
       renderMarkers();
       updateLabelScales();
     }
