@@ -1,10 +1,9 @@
 import streamlit as st
-import folium
-from streamlit_folium import st_folium
 import simulator
 import pandas as pd
 import numpy as np
 import utm
+from map_component import maplibre_component
 
 st.set_page_config(page_title="Simulador Topográfico Interativo", layout="wide")
 
@@ -23,6 +22,8 @@ if 'map_center' not in st.session_state:
     st.session_state.map_center = [-25.4484, -49.2310]
 if 'map_center_coord' not in st.session_state:
     st.session_state.map_center_coord = st.session_state.map_center
+if 'map_layer' not in st.session_state:
+    st.session_state.map_layer = "streets"
 if 'dev_authenticated' not in st.session_state:
     st.session_state.dev_authenticated = False
 if 'dev_mode' not in st.session_state:
@@ -106,7 +107,7 @@ if survey_category == "Poligonação":
     if "n_hv5_input" not in st.session_state:
         st.session_state.n_hv5_input = u_n + 250.0
 
-    # Sync inputs from map clicks
+    # Sync inputs from survey points
     if len(st.session_state.survey_points) >= 1:
         e, n, _, _ = utm.from_latlon(*st.session_state.survey_points[0])
         st.session_state.e1_input = round(float(e), 3)
@@ -185,107 +186,170 @@ else: # Nivelamento
         st.session_state.survey_points = [(float(la), float(lo)) for la, lo in zip(lats, lons)]
         st.rerun()
 
-# --- Labels Generation ---
+# --- Labels and Map Points Generation ---
 labels = []
 colors = []
+shapes = [] # 'triangle' for HVs, 'square' for Vértices, 'circle' for Pontos Irradiados
+map_points = []
+
 if survey_category == "Poligonação":
     if survey_type == "Fechada":
         for i in range(max_pts):
-            if i == 0: labels.append("HV1"); colors.append("red")
-            elif i == 1: labels.append("HV2"); colors.append("red")
-            else: labels.append(f"P{i-1}"); colors.append("blue")
+            if i == 0:
+                labels.append("HV1"); colors.append("red"); shapes.append("triangle")
+            elif i == 1:
+                labels.append("HV2"); colors.append("red"); shapes.append("triangle")
+            else:
+                labels.append(f"P{i-1}"); colors.append("blue"); shapes.append("square")
     else: # Linked
         for i in range(max_pts):
-            if i == 0: labels.append("HV1"); colors.append("red")
-            elif i == 1: labels.append("HV2"); colors.append("red")
-            elif i == max_pts - 2: labels.append("HV4"); colors.append("red")
-            elif i == max_pts - 1: labels.append("HV5"); colors.append("red")
-            else: labels.append(f"P{i-1}"); colors.append("blue")
+            if i == 0:
+                labels.append("HV1"); colors.append("red"); shapes.append("triangle")
+            elif i == 1:
+                labels.append("HV2"); colors.append("red"); shapes.append("triangle")
+            elif i == max_pts - 2:
+                labels.append("HV4"); colors.append("red"); shapes.append("triangle")
+            elif i == max_pts - 1:
+                labels.append("HV5"); colors.append("red"); shapes.append("triangle")
+            else:
+                labels.append(f"P{i-1}"); colors.append("blue"); shapes.append("square")
 else: # Nivelamento
     for i in range(max_pts):
         labels.append(f"P{i+1}")
         colors.append("red" if i == 0 else "blue")
+        shapes.append("triangle" if i == 0 else "square")
+
+# Build map_points structure for MapLibre Component
+for i, (lat, lon) in enumerate(st.session_state.survey_points):
+    lbl = labels[i] if i < len(labels) else f"P{i+1}"
+    clr = colors[i] if i < len(colors) else "blue"
+    shp = shapes[i] if i < len(shapes) else "square"
+    map_points.append({
+        'label': lbl,
+        'lat': float(lat),
+        'lon': float(lon),
+        'color': clr,
+        'shape': shp,
+        'category': 'survey',
+        'index': i
+    })
+
+# Add Radiation Points to map_points
+radiation_lines = []
+if survey_category == "Poligonação" and st.session_state.radiation_points:
+    for idx_r, rad in enumerate(st.session_state.radiation_points):
+        rad_lat, rad_lon = float(rad['lat']), float(rad['lon'])
+        map_points.append({
+            'label': rad['name'],
+            'lat': rad_lat,
+            'lon': rad_lon,
+            'color': 'green',
+            'shape': 'circle',
+            'category': 'radiation',
+            'index': idx_r
+        })
+        if rad['station'] in labels:
+            st_idx = labels.index(rad['station'])
+            if st_idx < len(st.session_state.survey_points):
+                st_lat, st_lon = st.session_state.survey_points[st_idx]
+                radiation_lines.append({
+                    'start': [float(st_lat), float(st_lon)],
+                    'end': [rad_lat, rad_lon]
+                })
+
+line_points = list(st.session_state.survey_points)
+if survey_category == "Poligonação" and survey_type == "Fechada" and len(line_points) >= max_pts:
+    line_points.append(line_points[1]) # Close on HV2
 
 # --- Main Layout ---
 col_map, col_data = st.columns([1.2, 0.8])
 
 with col_map:
     st.subheader("Mapa Interativo")
-    m = folium.Map(location=st.session_state.map_center_coord, zoom_start=st.session_state.map_zoom)
 
-    if st.session_state.survey_points:
-        points = st.session_state.survey_points
-        line_points = list(points)
-        if survey_category == "Poligonação" and survey_type == "Fechada" and len(points) >= max_pts:
-            line_points.append(points[1]) # Close on HV2
-
-        folium.PolyLine(line_points, color="blue", weight=2.5, dash_array='5, 5' if survey_category=="Poligonação" else None).add_to(m)
-        for i, (lat, lon) in enumerate(points):
-            if i < len(labels):
-                folium.CircleMarker([lat, lon], radius=6, color=colors[i], fill=True, popup=labels[i]).add_to(m)
-
-    # Render Radiation Points on Map
-    if survey_category == "Poligonação" and st.session_state.radiation_points:
-        for rad in st.session_state.radiation_points:
-            rad_lat, rad_lon = rad['lat'], rad['lon']
-            popup_text = f"{rad['name']} (Est: {rad['station']}, Ré: {rad['re']})"
-            folium.CircleMarker([rad_lat, rad_lon], radius=5, color="green", fill=True, fill_color="green", popup=popup_text).add_to(m)
-
-            if rad['station'] in labels:
-                st_idx = labels.index(rad['station'])
-                if st_idx < len(st.session_state.survey_points):
-                    st_lat, st_lon = st.session_state.survey_points[st_idx]
-                    folium.PolyLine([(st_lat, st_lon), (rad_lat, rad_lon)], color="green", weight=1.5, dash_array='3, 3').add_to(m)
-
-    map_data = st_folium(
-        m,
+    map_event = maplibre_component(
+        points=map_points,
+        traverse_lines=[[float(pt[0]), float(pt[1])] for pt in line_points],
+        radiation_lines=radiation_lines,
+        dash_traverse=(survey_category == "Poligonação"),
+        locked=st.session_state.map_locked,
         center=st.session_state.map_center_coord,
         zoom=st.session_state.map_zoom,
-        width=None,
+        current_layer=st.session_state.map_layer,
         height=500,
-        returned_objects=["last_clicked", "center", "zoom"],
-        use_container_width=True
+        key="maplibre_map"
     )
 
-    if map_data:
-        new_center = map_data.get("center")
-        if new_center:
-            if isinstance(new_center, dict) and "lat" in new_center and "lng" in new_center:
-                center_val = [float(new_center["lat"]), float(new_center["lng"])]
-                st.session_state.map_center = center_val
-                st.session_state.map_center_coord = center_val
-            elif isinstance(new_center, (list, tuple)) and len(new_center) >= 2:
-                center_val = [float(new_center[0]), float(new_center[1])]
-                st.session_state.map_center = center_val
-                st.session_state.map_center_coord = center_val
+    if map_event and isinstance(map_event, dict):
+        if "center" in map_event and map_event["center"]:
+            center_val = [float(map_event["center"][0]), float(map_event["center"][1])]
+            st.session_state.map_center = center_val
+            st.session_state.map_center_coord = center_val
+        if "zoom" in map_event and map_event["zoom"]:
+            st.session_state.map_zoom = map_event["zoom"]
+        if "current_layer" in map_event and map_event["current_layer"]:
+            st.session_state.map_layer = map_event["current_layer"]
 
-        new_zoom = map_data.get("zoom")
-        if new_zoom:
-            st.session_state.map_zoom = int(new_zoom)
+        event_type = map_event.get("event")
+        if event_type == "point_dragged" and not st.session_state.map_locked:
+            dragged = map_event.get("dragged_point")
+            if dragged:
+                cat = dragged.get("category")
+                idx = dragged.get("index")
+                n_lat = float(dragged.get("lat"))
+                n_lon = float(dragged.get("lon"))
 
-        if not st.session_state.map_locked and map_data.get("last_clicked"):
-            clicked = (float(map_data["last_clicked"]["lat"]), float(map_data["last_clicked"]["lng"]))
-            if len(st.session_state.survey_points) < max_pts:
-                if clicked not in st.session_state.survey_points:
-                    st.session_state.survey_points.append(clicked)
+                if cat == "survey" and 0 <= idx < len(st.session_state.survey_points):
+                    st.session_state.survey_points[idx] = (n_lat, n_lon)
+                    e, n, _, _ = utm.from_latlon(n_lat, n_lon)
+                    if idx == 0:
+                        st.session_state.e1_input = round(float(e), 3)
+                        st.session_state.n1_input = round(float(n), 3)
+                    elif idx == 1:
+                        st.session_state.e2_input = round(float(e), 3)
+                        st.session_state.n2_input = round(float(n), 3)
+                    elif survey_category == "Poligonação" and survey_type == "Enquadrada":
+                        if idx == max_pts - 2:
+                            st.session_state.e_hv4_input = round(float(e), 3)
+                            st.session_state.n_hv4_input = round(float(n), 3)
+                        elif idx == max_pts - 1:
+                            st.session_state.e_hv5_input = round(float(e), 3)
+                            st.session_state.n_hv5_input = round(float(n), 3)
                     st.rerun()
-            elif survey_category == "Poligonação":
-                existing_rad_coords = [(r['lat'], r['lon']) for r in st.session_state.radiation_points]
-                if clicked not in existing_rad_coords and clicked not in st.session_state.survey_points:
-                    idx = len(st.session_state.radiation_points) + 1
-                    e_pt, n_pt, _, _ = utm.from_latlon(clicked[0], clicked[1])
-                    def_station = labels[1] if len(labels) > 1 else labels[0]
-                    def_re = simulator.get_automatic_backsight(def_station, labels)
-                    st.session_state.radiation_points.append({
-                        'name': f"IRR{idx}",
-                        'lat': clicked[0],
-                        'lon': clicked[1],
-                        'e': round(float(e_pt), 3),
-                        'n': round(float(n_pt), 3),
-                        'station': def_station,
-                        're': def_re
-                    })
+
+                elif cat == "radiation" and 0 <= idx < len(st.session_state.radiation_points):
+                    e_pt, n_pt, _, _ = utm.from_latlon(n_lat, n_lon)
+                    st.session_state.radiation_points[idx]['lat'] = n_lat
+                    st.session_state.radiation_points[idx]['lon'] = n_lon
+                    st.session_state.radiation_points[idx]['e'] = round(float(e_pt), 3)
+                    st.session_state.radiation_points[idx]['n'] = round(float(n_pt), 3)
                     st.rerun()
+
+        elif event_type == "map_clicked" and not st.session_state.map_locked:
+            clicked_data = map_event.get("clicked")
+            if clicked_data:
+                clicked = (float(clicked_data["lat"]), float(clicked_data["lng"]))
+                if len(st.session_state.survey_points) < max_pts:
+                    if clicked not in st.session_state.survey_points:
+                        st.session_state.survey_points.append(clicked)
+                        st.rerun()
+                elif survey_category == "Poligonação":
+                    existing_rad_coords = [(r['lat'], r['lon']) for r in st.session_state.radiation_points]
+                    if clicked not in existing_rad_coords and clicked not in st.session_state.survey_points:
+                        idx = len(st.session_state.radiation_points) + 1
+                        e_pt, n_pt, _, _ = utm.from_latlon(clicked[0], clicked[1])
+                        def_station = labels[1] if len(labels) > 1 else labels[0]
+                        def_re = simulator.get_automatic_backsight(def_station, labels)
+                        st.session_state.radiation_points.append({
+                            'name': f"IRR{idx}",
+                            'lat': clicked[0],
+                            'lon': clicked[1],
+                            'e': round(float(e_pt), 3),
+                            'n': round(float(n_pt), 3),
+                            'station': def_station,
+                            're': def_re
+                        })
+                        st.rerun()
 
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
