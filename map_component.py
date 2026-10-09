@@ -21,6 +21,7 @@ def maplibre_component(
     traverse_lines=None,
     radiation_lines=None,
     dash_traverse=True,
+    is_closed=False,
     locked=False,
     center=None,
     zoom=16,
@@ -34,8 +35,9 @@ def maplibre_component(
     Parameters:
     - points: list of dicts with keys: label, lat, lon, color ('red'|'blue'|'green'), shape ('triangle'|'square'|'circle'), category ('survey'|'radiation'), index
     - traverse_lines: list of [lat, lon] tuples/lists
-    - radiation_lines: list of dicts with keys: start: [lat, lon], end: [lat, lon]
+    - radiation_lines: list of dicts with keys: start: [lat, lon], end: [lat, lon], station: str, rad_index: int
     - dash_traverse: boolean
+    - is_closed: boolean
     - locked: boolean
     - center: [lat, lon]
     - zoom: int/float
@@ -51,6 +53,7 @@ def maplibre_component(
         traverse_lines=traverse_lines or [],
         radiation_lines=radiation_lines or [],
         dash_traverse=dash_traverse,
+        is_closed=is_closed,
         locked=locked,
         center=center,
         zoom=zoom,

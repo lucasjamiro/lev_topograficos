@@ -55,8 +55,8 @@
 
     /* Marker Element Container */
     .custom-marker-wrapper {
-      display: flex;
-      flex-direction: column;
+      position: relative;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
@@ -72,20 +72,27 @@
     }
 
     .marker-label {
-      background: rgba(255, 255, 255, 0.85);
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 2px;
+      background: rgba(255, 255, 255, 0.92);
       border: 1px solid rgba(0,0,0,0.2);
       border-radius: 3px;
       padding: 1px 4px;
-      font-weight: bold;
+      font-weight: 600;
+      color: #1e293b;
       white-space: nowrap;
       pointer-events: none;
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-      margin-top: 2px;
       transition: font-size 0.1s ease;
+      z-index: 10;
     }
 
     .svg-marker {
-      filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.3));
+      filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.3));
+      display: block;
     }
   </style>
 </head>
@@ -156,30 +163,39 @@
     let markers = [];
     let currentStyle = 'streets';
     let currentProps = null;
+    let lastSentState = { center: null, zoom: null, current_layer: null };
 
     function getSVGIcon(shape, color) {
-      const hexColor = color === 'red' ? '#e74c3c' : (color === 'green' ? '#2ecc71' : '#3498db');
+      let strokeColor = '#3498db';
+      let fillColor = 'rgba(52, 152, 219, 0.2)';
+      if (color === 'red') {
+        strokeColor = '#dc2626';
+        fillColor = 'rgba(220, 38, 38, 0.18)';
+      } else if (color === 'green') {
+        strokeColor = '#16a34a';
+        fillColor = 'rgba(22, 163, 74, 0.18)';
+      } else if (color === 'blue') {
+        strokeColor = '#2563eb';
+        fillColor = 'rgba(37, 99, 235, 0.18)';
+      }
+
       if (shape === 'triangle') {
-        return `<svg class="svg-marker" width="24" height="24" viewBox="0 0 24 24">
-                  <polygon points="12,2 22,21 2,21" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+        return `<svg class="svg-marker" width="22" height="22" viewBox="0 0 22 22">
+                  <polygon points="11,2 20,19 2,19" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" stroke-linejoin="round" />
                 </svg>`;
       } else if (shape === 'square') {
         return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
-                  <rect x="2" y="2" width="16" height="16" rx="2" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+                  <rect x="2.5" y="2.5" width="15" height="15" rx="1.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" stroke-linejoin="round" />
                 </svg>`;
       } else {
         // Circle
         return `<svg class="svg-marker" width="20" height="20" viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="8" fill="${hexColor}" stroke="#ffffff" stroke-width="2" />
+                  <circle cx="10" cy="10" r="7.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" />
                 </svg>`;
       }
     }
 
     function calculateLabelFontSize(zoom) {
-      // Inverse scaling or smooth scaling formula:
-      // High zoom level (e.g. 18-20) -> legible, moderate font size (11-12px)
-      // Low zoom level (e.g. 10-14) -> proportional, readable font size
-      // We clamp so font size stays cleanly legible without becoming gigantically oversized.
       const baseSize = 12;
       const zoomFactor = (16 - zoom) * 0.8;
       let size = baseSize + zoomFactor;
@@ -200,6 +216,8 @@
 
     function setBaseLayer(styleName) {
       if (!map || !BASE_STYLES[styleName]) return;
+      if (currentStyle === styleName && map.getStyle()) return;
+
       currentStyle = styleName;
 
       ['streets', 'satellite', 'vector'].forEach(name => {
@@ -212,7 +230,6 @@
 
       map.setStyle(BASE_STYLES[styleName]);
 
-      // When style reloads, re-add polyline sources and layers
       map.once('style.load', () => {
         renderPolylines();
       });
@@ -224,6 +241,11 @@
       if (!map) return;
       const center = map.getCenter();
       const zoom = map.getZoom();
+      lastSentState = {
+        center: [center.lat, center.lng],
+        zoom: zoom,
+        current_layer: currentStyle
+      };
       const payload = Object.assign({
         event: eventType,
         center: [center.lat, center.lng],
@@ -233,10 +255,81 @@
       setComponentValue(payload);
     }
 
+    function updateLineDataFromPoints() {
+      if (!map || !currentProps || !currentProps.points) return;
+
+      // 1. Traverse Line Dynamic Update
+      if (currentProps.traverse_lines && currentProps.traverse_lines.length > 0) {
+        const surveyPts = currentProps.points
+          .filter(p => p.category === 'survey')
+          .sort((a, b) => a.index - b.index);
+
+        let coords = surveyPts.map(p => [p.lon, p.lat]);
+
+        if (currentProps.is_closed && surveyPts.length > 1) {
+          const closePt = surveyPts.length > 1 ? surveyPts[1] : surveyPts[0];
+          coords.push([closePt.lon, closePt.lat]);
+        }
+
+        const travSource = map.getSource('traverse-line-src');
+        if (travSource) {
+          travSource.setData({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: coords
+            }
+          });
+        }
+      }
+
+      // 2. Radiation Lines Dynamic Update
+      if (currentProps.radiation_lines && currentProps.radiation_lines.length > 0) {
+        const pointsMap = {};
+        currentProps.points.forEach(p => {
+          pointsMap[p.label] = p;
+          if (p.category === 'radiation') {
+            pointsMap['rad_' + p.index] = p;
+          }
+        });
+
+        const features = currentProps.radiation_lines.map(line => {
+          let startLon = line.start[1];
+          let startLat = line.start[0];
+          let endLon = line.end[1];
+          let endLat = line.end[0];
+
+          if (line.station && pointsMap[line.station]) {
+            startLat = pointsMap[line.station].lat;
+            startLon = pointsMap[line.station].lon;
+          }
+          if (line.rad_index !== undefined && pointsMap['rad_' + line.rad_index]) {
+            endLat = pointsMap['rad_' + line.rad_index].lat;
+            endLon = pointsMap['rad_' + line.rad_index].lon;
+          }
+
+          return {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[startLon, startLat], [endLon, endLat]]
+            }
+          };
+        });
+
+        const radSource = map.getSource('radiation-lines-src');
+        if (radSource) {
+          radSource.setData({
+            type: 'FeatureCollection',
+            features: features
+          });
+        }
+      }
+    }
+
     function renderPolylines() {
       if (!map || !currentProps) return;
 
-      // Remove existing polyline layers and sources
       if (map.getLayer('traverse-line')) map.removeLayer('traverse-line');
       if (map.getSource('traverse-line-src')) map.removeSource('traverse-line-src');
 
@@ -245,7 +338,6 @@
 
       // 1. Traverse Line
       if (currentProps.traverse_lines && currentProps.traverse_lines.length > 1) {
-        // traverse_lines is array of [lat, lon]
         const coords = currentProps.traverse_lines.map(p => [p[1], p[0]]); // [lon, lat]
         map.addSource('traverse-line-src', {
           type: 'geojson',
@@ -302,51 +394,89 @@
           }
         });
       }
+
+      updateLineDataFromPoints();
     }
 
     function renderMarkers() {
-      // Clear old markers
-      markers.forEach(m => m.remove());
-      markers = [];
-
-      if (!currentProps || !currentProps.points) return;
+      if (!currentProps || !currentProps.points) {
+        markers.forEach(m => m.remove());
+        markers = [];
+        return;
+      }
 
       const isLocked = currentProps.locked || false;
+      const newPts = currentProps.points;
 
-      currentProps.points.forEach((pt, index) => {
-        // pt format: { label, lat, lon, color, shape, category: 'survey'|'radiation'|'control', index }
-        const el = document.createElement('div');
-        el.className = 'custom-marker-wrapper' + (!isLocked ? ' draggable' : '');
-
-        const iconHTML = getSVGIcon(pt.shape, pt.color);
-        const labelHTML = `<div class="marker-label" style="font-size: ${calculateLabelFontSize(map.getZoom())}">${pt.label}</div>`;
-        el.innerHTML = iconHTML + labelHTML;
-
-        const marker = new maplibregl.Marker({
-          element: el,
-          draggable: !isLocked,
-          anchor: 'center'
-        })
-        .setLngLat([pt.lon, pt.lat])
-        .addTo(map);
-
-        if (!isLocked) {
-          marker.on('dragend', () => {
-            const lngLat = marker.getLngLat();
-            sendStateUpdate('point_dragged', {
-              dragged_point: {
-                category: pt.category,
-                index: pt.index,
-                label: pt.label,
-                lat: lngLat.lat,
-                lon: lngLat.lng
-              }
-            });
-          });
-        }
-
-        markers.push(marker);
+      // Check if existing markers match newPts count and key identity
+      const canUpdateInPlace = (markers.length === newPts.length) && markers.every((m, idx) => {
+        return m._pointLabel === newPts[idx].label && m._pointCategory === newPts[idx].category;
       });
+
+      if (canUpdateInPlace) {
+        newPts.forEach((pt, idx) => {
+          const marker = markers[idx];
+          marker.setLngLat([pt.lon, pt.lat]);
+          marker.setDraggable(!isLocked);
+          const el = marker.getElement();
+          if (!isLocked) {
+            el.classList.add('draggable');
+          } else {
+            el.classList.remove('draggable');
+          }
+        });
+      } else {
+        markers.forEach(m => m.remove());
+        markers = [];
+
+        newPts.forEach((pt, index) => {
+          const el = document.createElement('div');
+          el.className = 'custom-marker-wrapper' + (!isLocked ? ' draggable' : '');
+
+          const iconHTML = getSVGIcon(pt.shape, pt.color);
+          const labelHTML = `<div class="marker-label" style="font-size: ${calculateLabelFontSize(map.getZoom())}">${pt.label}</div>`;
+          el.innerHTML = iconHTML + labelHTML;
+
+          const marker = new maplibregl.Marker({
+            element: el,
+            draggable: !isLocked,
+            anchor: 'center'
+          })
+          .setLngLat([pt.lon, pt.lat])
+          .addTo(map);
+
+          marker._pointLabel = pt.label;
+          marker._pointCategory = pt.category;
+          marker._pointIndex = pt.index;
+
+          if (!isLocked) {
+            marker.on('drag', () => {
+              const lngLat = marker.getLngLat();
+              pt.lat = lngLat.lat;
+              pt.lon = lngLat.lng;
+              updateLineDataFromPoints();
+            });
+
+            marker.on('dragend', () => {
+              const lngLat = marker.getLngLat();
+              pt.lat = lngLat.lat;
+              pt.lon = lngLat.lng;
+              updateLineDataFromPoints();
+              sendStateUpdate('point_dragged', {
+                dragged_point: {
+                  category: pt.category,
+                  index: pt.index,
+                  label: pt.label,
+                  lat: lngLat.lat,
+                  lon: lngLat.lng
+                }
+              });
+            });
+          }
+
+          markers.push(marker);
+        });
+      }
     }
 
     function initializeMap(props) {
@@ -359,7 +489,7 @@
       map = new maplibregl.Map({
         container: 'map',
         style: BASE_STYLES[currentStyle],
-        center: [center[1], center[0]], // [lon, lat]
+        center: [center[1], center[0]],
         zoom: zoom,
         attributionControl: true
       });
@@ -400,18 +530,29 @@
         setBaseLayer(props.current_layer);
       }
 
-      // Sync viewport if provided and significantly different
+      // Sync viewport if provided and significantly different from current and last sent
       if (props.center && map) {
         const curCenter = map.getCenter();
         const latDiff = Math.abs(curCenter.lat - props.center[0]);
         const lonDiff = Math.abs(curCenter.lng - props.center[1]);
-        if (latDiff > 0.00001 || lonDiff > 0.00001) {
-          map.setCenter([props.center[1], props.center[0]]);
+
+        const lastLatDiff = lastSentState.center ? Math.abs(lastSentState.center[0] - props.center[0]) : 1;
+        const lastLonDiff = lastSentState.center ? Math.abs(lastSentState.center[1] - props.center[1]) : 1;
+
+        if (latDiff > 0.0001 || lonDiff > 0.0001) {
+          if (lastLatDiff > 0.00005 || lastLonDiff > 0.00005) {
+            map.setCenter([props.center[1], props.center[0]]);
+          }
         }
       }
 
-      if (props.zoom && map && Math.abs(map.getZoom() - props.zoom) > 0.1) {
-        map.setZoom(props.zoom);
+      if (props.zoom && map) {
+        const curZoom = map.getZoom();
+        const zoomDiff = Math.abs(curZoom - props.zoom);
+        const lastZoomDiff = lastSentState.zoom ? Math.abs(lastSentState.zoom - props.zoom) : 1;
+        if (zoomDiff > 0.2 && lastZoomDiff > 0.1) {
+          map.setZoom(props.zoom);
+        }
       }
 
       if (map.isStyleLoaded()) {
