@@ -375,22 +375,24 @@ with col_data:
                             "Ré": auto_re
                         })
                     df_rad = pd.DataFrame(rad_rows)
-                    edited_rad_df = st.data_editor(
-                        df_rad,
-                        column_config={
-                            "Ponto": st.column_config.TextColumn("Ponto", disabled=True),
-                            "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.3f"),
-                            "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.3f"),
-                            "Estação": st.column_config.SelectboxColumn("Estação", options=labels, required=True),
-                            "Ré": st.column_config.TextColumn("Ré (Automático)", disabled=True)
-                        },
-                        disabled=st.session_state.map_locked,
-                        num_rows="fixed",
-                        use_container_width=True,
-                        key="rad_editor"
-                    )
+                    with st.form("radiation_update_form"):
+                        edited_rad_df = st.data_editor(
+                            df_rad,
+                            column_config={
+                                "Ponto": st.column_config.TextColumn("Ponto", disabled=True),
+                                "Este (m)": st.column_config.NumberColumn("Este (m)", format="%.3f"),
+                                "Norte (m)": st.column_config.NumberColumn("Norte (m)", format="%.3f"),
+                                "Estação": st.column_config.SelectboxColumn("Estação", options=labels, required=True),
+                                "Ré": st.column_config.TextColumn("Ré (Automático)", disabled=True)
+                            },
+                            disabled=st.session_state.map_locked,
+                            num_rows="fixed",
+                            use_container_width=True,
+                            key="rad_editor"
+                        )
+                        update_btn = st.form_submit_button("Atualizar Irradiações")
 
-                    if not edited_rad_df.equals(df_rad):
+                    if update_btn:
                         updated_rads = []
                         for idx_r, row_r in edited_rad_df.iterrows():
                             try:
@@ -409,6 +411,7 @@ with col_data:
                                 're': auto_re
                             })
                         st.session_state.radiation_points = updated_rads
+                        st.rerun()
 
         if st.session_state.map_locked:
             st.info("🔒 Traçado e irradiações bloqueados.")
