@@ -19,7 +19,7 @@
     <script>
       stlite.mount(
         {
-          requirements: ["numpy", "pandas", "utm"],
+          requirements: ["folium", "streamlit-folium", "numpy", "pandas", "utm", "branca"],
           entrypoint: "app.py",
           files: {
             "app.py": {
@@ -27,12 +27,6 @@
             },
             "simulator.py": {
               url: "simulator.py",
-            },
-            "map_component.py": {
-              url: "map_component.py",
-            },
-            "maplibre_component/index.html": {
-              url: "maplibre_component/index.html",
             },
           },
         },
