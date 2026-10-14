@@ -145,9 +145,84 @@ def generate_traverse_coordinates(n_intermediate, survey_type="Closed", start_la
 
         return np.array(lats), np.array(lons)
 
-def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", angle_sigma=0.005, dist_sigma=0.005, radiation_data=None):
+def circular_mean_deg(angles):
     """
-    Simulates raw field observations for main traverse and optional radiation points.
+    Computes circular mean of angles in degrees using arctan2 to avoid 0/360 wrap-around issues.
+    """
+    rads = np.radians(angles)
+    sin_mean = np.mean(np.sin(rads))
+    cos_mean = np.mean(np.cos(rads))
+    mean_rad = np.arctan2(sin_mean, cos_mean)
+    return float((np.degrees(mean_rad) + 360) % 360)
+
+def reduce_conjugated_observations(df):
+    """
+    Reduces conjugated observations (PD/PI series) into single direct equivalent field readings.
+    If 'Posição' column is absent or all rows are simple PDs without PI rows, returns df as-is (formatted).
+    """
+    if df is None or df.empty or "Posição" not in df.columns:
+        return df
+
+    # Check if any PI rows exist
+    if not (df["Posição"] == "PI").any():
+        # Drop Posição and Série if present and return clean field format
+        cols = [c for c in df.columns if c not in ["Posição", "Série"]]
+        return df[cols].copy()
+
+    # Convert PI rows to PD equivalents
+    converted_rows = []
+    for _, row in df.iterrows():
+        pos = row.get("Posição", "PD")
+        dir_re = float(row["Dir. Ré (°)"])
+        dir_vante = float(row["Dir. Vante (°)"])
+        zenith = float(row["Ângulo Zenital (°)"])
+        dist = float(row["Dist. Inclinada (m)"])
+
+        if pos == "PI":
+            dir_re = (dir_re - 180.0 + 360.0) % 360.0
+            dir_vante = (dir_vante - 180.0 + 360.0) % 360.0
+            zenith = (360.0 - zenith) % 360.0
+
+        converted_rows.append({
+            "Estação": row["Estação"],
+            "Ré": row["Ré"],
+            "Vante": row["Vante"],
+            "Dir. Ré (°)": dir_re,
+            "Dir. Vante (°)": dir_vante,
+            "Ângulo Zenital (°)": zenith,
+            "Dist. Inclinada (m)": dist
+        })
+
+    converted_df = pd.DataFrame(converted_rows)
+
+    reduced_rows = []
+    grouped = converted_df.groupby(["Estação", "Ré", "Vante"], sort=False)
+    for (st_val, re_val, va_val), group in grouped:
+        r_re = circular_mean_deg(group["Dir. Ré (°)"])
+        r_va = circular_mean_deg(group["Dir. Vante (°)"])
+        r_ze = circular_mean_deg(group["Ângulo Zenital (°)"])
+        r_di = float(np.mean(group["Dist. Inclinada (m)"]))
+
+        reduced_rows.append({
+            "Estação": st_val,
+            "Ré": re_val,
+            "Vante": va_val,
+            "Dir. Ré (°)": round(r_re, 7),
+            "Dir. Vante (°)": round(r_va, 7),
+            "Ângulo Zenital (°)": round(r_ze, 7),
+            "Dist. Inclinada (m)": round(r_di, 4)
+        })
+
+    return pd.DataFrame(reduced_rows)
+
+def simulate_traverse_observations(
+    e_coords, n_coords, survey_type="Closed",
+    angle_sigma=0.005, dist_sigma=0.005, radiation_data=None,
+    conjugated_mode=False, n_conj_vertices=1, n_conj_rad=1
+):
+    """
+    Simulates raw field observations for main traverse and optional radiation points,
+    incorporating NBR 13133 error distribution and optional conjugated readings (PD/PI).
     """
     n = len(e_coords)
     observations = []
@@ -177,22 +252,30 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
     stations = []
     if survey_type == "Closed":
         # Stations: HV2, P1...Pn-2, then back to HV2
-        # Sequence indices: 0(HV1), 1(HV2), 2(P1), ..., n-1(P_n-2)
-        # 1: R=0, V=2
         stations.append((1, 0, 2))
-        # i: R=i-1, V=i+1
         for i in range(2, n - 1):
             stations.append((i, i-1, i+1))
-        # Last station: n-1, R=n-2, V=1
         stations.append((n-1, n-2, 1))
-        # Closure station at HV2: R=n-1, V=2
         stations.append((1, n-1, 2))
-
+        inner_pts = n - 2
+        num_occupied_stations = inner_pts + 1
     else: # Linked
-        # Sequence indices: 0(HV1), 1(HV2), 2(P1), ..., n-3(Pn), n-2(HV4), n-1(HV5)
-        # Stations: 1(HV2), 2(P1)...n-2(HV4)
         for i in range(1, n - 1):
             stations.append((i, i-1, i+1))
+        inner_pts = n - 4
+        num_occupied_stations = inner_pts + 2
+
+    # NBR 13133 Error Model Calculation
+    # E_total in seconds drawn uniformly from [0, 9*sqrt(N) + 15'']
+    limit_sec = 9.0 * np.sqrt(num_occupied_stations) + 15.0
+    mag_sec = np.random.uniform(0.0, limit_sec)
+    sign = np.random.choice([-1, 1])
+    e_total_deg = (sign * mag_sec) / 3600.0
+
+    # Distribute E_total across N occupied stations using normalized random weights
+    weights = np.random.uniform(0.1, 1.0, size=num_occupied_stations)
+    weights = weights / np.sum(weights)
+    station_errors = weights * e_total_deg
 
     station_zero_dir = {} # Store circle zero direction per station
 
@@ -203,30 +286,72 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
 
         d_horiz_true = np.sqrt((e_coords[v_idx]-e_coords[s_idx])**2 + (n_coords[v_idx]-n_coords[s_idx])**2)
         d_inc_true = np.sqrt(d_horiz_true**2 + (elevations[v_idx]-elevations[s_idx])**2)
-        d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
 
-        dir_re = np.random.uniform(0, 360)
+        dir_re_base = np.random.uniform(0, 360)
         az_fs = calculate_azimuth_flat(e_coords[s_idx], n_coords[s_idx], e_coords[v_idx], n_coords[v_idx])
         az_re = calculate_azimuth_flat(e_coords[s_idx], n_coords[s_idx], e_coords[re_idx], n_coords[re_idx])
 
         # Station circle zero direction
-        station_zero_dir[s_label] = (dir_re - az_re + 360) % 360
+        station_zero_dir[s_label] = (dir_re_base - az_re + 360) % 360
 
+        # Station error for occupied station (s_idx - 1)
+        st_err = station_errors[(s_idx - 1) % num_occupied_stations]
         true_angle = (az_fs - az_re + 360) % 360
-        dir_vante = (dir_re + true_angle + np.random.normal(0, angle_sigma)) % 360
+        dir_vante_base = (dir_re_base + true_angle + st_err) % 360
 
-        slope_angle = np.degrees(np.arctan2(elevations[v_idx] - elevations[s_idx], d_horiz_true))
-        zenith_measured = 90 - slope_angle + np.random.normal(0, angle_sigma)
+        slope_angle = np.degrees(np.arctan2(elevations[v_idx] - elevations[s_idx], d_horiz_true)) if d_horiz_true > 1e-6 else 0.0
+        z_base = (90.0 - slope_angle) % 360
 
-        observations.append({
-            "Estação": s_label,
-            "Ré": re_label,
-            "Vante": v_label,
-            "Dir. Ré (°)": round(dir_re, 7),
-            "Dir. Vante (°)": round(dir_vante, 7),
-            "Ângulo Zenital (°)": round(zenith_measured, 7),
-            "Dist. Inclinada (m)": round(d_inc_measured, 4)
-        })
+        if conjugated_mode:
+            c_count = max(1, int(n_conj_vertices))
+            for c in range(1, c_count + 1):
+                # PD Row
+                dir_re_pd = (dir_re_base + np.random.normal(0, 5/3600.0)) % 360
+                dir_vante_pd = (dir_vante_base + np.random.normal(0, 5/3600.0)) % 360
+                zenith_pd = (z_base + np.random.normal(0, 5/3600.0)) % 360
+                dist_pd = d_inc_true + np.random.normal(0, 0.010)
+
+                observations.append({
+                    "Estação": s_label,
+                    "Ré": re_label,
+                    "Vante": v_label,
+                    "Posição": "PD",
+                    "Série": c,
+                    "Dir. Ré (°)": round(dir_re_pd, 7),
+                    "Dir. Vante (°)": round(dir_vante_pd, 7),
+                    "Ângulo Zenital (°)": round(zenith_pd, 7),
+                    "Dist. Inclinada (m)": round(dist_pd, 4)
+                })
+
+                # PI Row
+                dir_re_pi = (dir_re_base + 180.0 + np.random.normal(0, 5/3600.0)) % 360
+                dir_vante_pi = (dir_vante_base + 180.0 + np.random.normal(0, 5/3600.0)) % 360
+                zenith_pi = ((360.0 - z_base) + np.random.normal(0, 5/3600.0)) % 360
+                dist_pi = d_inc_true + np.random.normal(0, 0.010)
+
+                observations.append({
+                    "Estação": s_label,
+                    "Ré": re_label,
+                    "Vante": v_label,
+                    "Posição": "PI",
+                    "Série": c,
+                    "Dir. Ré (°)": round(dir_re_pi, 7),
+                    "Dir. Vante (°)": round(dir_vante_pi, 7),
+                    "Ângulo Zenital (°)": round(zenith_pi, 7),
+                    "Dist. Inclinada (m)": round(dist_pi, 4)
+                })
+        else:
+            d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
+            zenith_measured = z_base + np.random.normal(0, angle_sigma)
+            observations.append({
+                "Estação": s_label,
+                "Ré": re_label,
+                "Vante": v_label,
+                "Dir. Ré (°)": round(dir_re_base, 7),
+                "Dir. Vante (°)": round(dir_vante_base, 7),
+                "Ângulo Zenital (°)": round(zenith_measured, 7),
+                "Dist. Inclinada (m)": round(d_inc_measured, 4)
+            })
 
     # Process Radiation Points if provided
     if radiation_data is not None:
@@ -234,6 +359,8 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
             rad_list = radiation_data.to_dict("records")
         else:
             rad_list = radiation_data
+
+        rad_noise_deg = 10.0 / 3600.0 # Standard deviation fixed at 10'' for radiation points
 
         for rad in rad_list:
             v_label = rad.get("Ponto") or rad.get("name")
@@ -251,29 +378,89 @@ def simulate_traverse_observations(e_coords, n_coords, survey_type="Closed", ang
 
             d_horiz_true = np.sqrt((e_v - e_s)**2 + (n_v - n_s)**2)
             d_inc_true = np.sqrt(d_horiz_true**2 + (z_v - z_s)**2)
-            d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
 
             dir_0 = station_zero_dir.get(s_label, np.random.uniform(0, 360))
 
             az_re = calculate_azimuth_flat(e_s, n_s, e_r, n_r)
             az_fs = calculate_azimuth_flat(e_s, n_s, e_v, n_v)
 
-            dir_re = (dir_0 + az_re) % 360
+            dir_re_base = (dir_0 + az_re) % 360
             true_angle = (az_fs - az_re + 360) % 360
-            dir_vante = (dir_re + true_angle + np.random.normal(0, angle_sigma)) % 360
+            rad_err = np.random.normal(0, rad_noise_deg)
+            dir_vante_base = (dir_re_base + true_angle + rad_err) % 360
 
             slope_angle = np.degrees(np.arctan2(z_v - z_s, d_horiz_true)) if d_horiz_true > 1e-6 else 0.0
-            zenith_measured = 90 - slope_angle + np.random.normal(0, angle_sigma)
+            z_base = (90.0 - slope_angle) % 360
 
-            observations.append({
-                "Estação": s_label,
-                "Ré": re_label,
-                "Vante": v_label,
-                "Dir. Ré (°)": round(dir_re, 7),
-                "Dir. Vante (°)": round(dir_vante, 7),
-                "Ângulo Zenital (°)": round(zenith_measured, 7),
-                "Dist. Inclinada (m)": round(d_inc_measured, 4)
-            })
+            if conjugated_mode:
+                c_rad_count = int(n_conj_rad)
+                if c_rad_count == 0:
+                    # Simple Reading: 1 standard row marked "PD", "Série": 1
+                    dir_re_pd = (dir_re_base + np.random.normal(0, 5/3600.0)) % 360
+                    dir_vante_pd = (dir_vante_base + np.random.normal(0, 5/3600.0)) % 360
+                    zenith_pd = (z_base + np.random.normal(0, 5/3600.0)) % 360
+                    dist_pd = d_inc_true + np.random.normal(0, 0.010)
+
+                    observations.append({
+                        "Estação": s_label,
+                        "Ré": re_label,
+                        "Vante": v_label,
+                        "Posição": "PD",
+                        "Série": 1,
+                        "Dir. Ré (°)": round(dir_re_pd, 7),
+                        "Dir. Vante (°)": round(dir_vante_pd, 7),
+                        "Ângulo Zenital (°)": round(zenith_pd, 7),
+                        "Dist. Inclinada (m)": round(dist_pd, 4)
+                    })
+                else:
+                    for c in range(1, c_rad_count + 1):
+                        # PD Row
+                        dir_re_pd = (dir_re_base + np.random.normal(0, 5/3600.0)) % 360
+                        dir_vante_pd = (dir_vante_base + np.random.normal(0, 5/3600.0)) % 360
+                        zenith_pd = (z_base + np.random.normal(0, 5/3600.0)) % 360
+                        dist_pd = d_inc_true + np.random.normal(0, 0.010)
+
+                        observations.append({
+                            "Estação": s_label,
+                            "Ré": re_label,
+                            "Vante": v_label,
+                            "Posição": "PD",
+                            "Série": c,
+                            "Dir. Ré (°)": round(dir_re_pd, 7),
+                            "Dir. Vante (°)": round(dir_vante_pd, 7),
+                            "Ângulo Zenital (°)": round(zenith_pd, 7),
+                            "Dist. Inclinada (m)": round(dist_pd, 4)
+                        })
+
+                        # PI Row
+                        dir_re_pi = (dir_re_base + 180.0 + np.random.normal(0, 5/3600.0)) % 360
+                        dir_vante_pi = (dir_vante_base + 180.0 + np.random.normal(0, 5/3600.0)) % 360
+                        zenith_pi = ((360.0 - z_base) + np.random.normal(0, 5/3600.0)) % 360
+                        dist_pi = d_inc_true + np.random.normal(0, 0.010)
+
+                        observations.append({
+                            "Estação": s_label,
+                            "Ré": re_label,
+                            "Vante": v_label,
+                            "Posição": "PI",
+                            "Série": c,
+                            "Dir. Ré (°)": round(dir_re_pi, 7),
+                            "Dir. Vante (°)": round(dir_vante_pi, 7),
+                            "Ângulo Zenital (°)": round(zenith_pi, 7),
+                            "Dist. Inclinada (m)": round(dist_pi, 4)
+                        })
+            else:
+                d_inc_measured = d_inc_true + np.random.normal(0, dist_sigma)
+                zenith_measured = z_base + np.random.normal(0, angle_sigma)
+                observations.append({
+                    "Estação": s_label,
+                    "Ré": re_label,
+                    "Vante": v_label,
+                    "Dir. Ré (°)": round(dir_re_base, 7),
+                    "Dir. Vante (°)": round(dir_vante_base, 7),
+                    "Ângulo Zenital (°)": round(zenith_measured, 7),
+                    "Dist. Inclinada (m)": round(d_inc_measured, 4)
+                })
 
     return pd.DataFrame(observations)
 
