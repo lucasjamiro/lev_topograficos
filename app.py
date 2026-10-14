@@ -76,6 +76,26 @@ challenge_mode = st.sidebar.toggle("🎯 Modo Desafio", help="Esconde os resulta
 if survey_category == "Poligonação":
     survey_type = st.sidebar.radio("1.1 Tipo de Poligonal", ["Fechada", "Enquadrada"], on_change=reset_survey)
 
+    toggle_conjugated = st.sidebar.toggle("🔭 Ativar Leituras Conjugadas", key="toggle_conjugated")
+    if toggle_conjugated:
+        n_conj_vertices = st.sidebar.number_input(
+            "Séries Conjugadas (Vértices)",
+            min_value=1,
+            value=1,
+            help="Número de séries conjugadas (PD/PI) para os vértices da poligonal. Mínimo 1.",
+            key="n_conj_vertices"
+        )
+        n_conj_rad = st.sidebar.number_input(
+            "Séries Conjugadas (Irradiação)",
+            min_value=0,
+            value=1,
+            help="Número de séries conjugadas (PD/PI) para pontos irradiados. Insira 0 para considerar leitura simples (apenas PD).",
+            key="n_conj_rad"
+        )
+    else:
+        n_conj_vertices = 1
+        n_conj_rad = 1
+
     if survey_type == "Fechada":
         # Closed: HV1, HV2 + P1...Pn (Total = n + 2)
         n_inter = st.sidebar.number_input("1.1.1 Nº de Vértices de Passagem (P1...Pn)", min_value=1, max_value=48, value=3)
@@ -443,7 +463,10 @@ with col_data:
                         st.session_state.survey_data = simulator.simulate_traverse_observations(
                             e_coords, n_coords,
                             survey_type="Closed" if survey_type == "Fechada" else "Linked",
-                            radiation_data=st.session_state.radiation_points
+                            radiation_data=st.session_state.radiation_points,
+                            conjugated_mode=toggle_conjugated,
+                            n_conj_vertices=n_conj_vertices,
+                            n_conj_rad=n_conj_rad
                         )
                     else:
                         obs, elevs = simulator.simulate_leveling(len(e_coords), type=survey_type, method=method)
@@ -460,14 +483,34 @@ if st.session_state.survey_data is not None:
             end_cs = (e_hv_end1, n_hv_end1, 100.0) if e_hv_end1 else None
             end_ce = (e_hv_end2, n_hv_end2, 100.0) if e_hv_end2 else None
 
+            reduced_data = simulator.reduce_conjugated_observations(st.session_state.survey_data)
+
             pre, az_df, raw, errs, adj = simulator.process_traverse_data(
-                st.session_state.survey_data, (e1, n1, 100.0), (e_hv2, n_hv2, 100.0),
+                reduced_data, (e1, n1, 100.0), (e_hv2, n_hv2, 100.0),
                 survey_type="Closed" if survey_type == "Fechada" else "Linked",
                 end_coords_start=end_cs, end_coords_end=end_ce
             )
 
-            t1, t2, t3, t4, t5, t6 = st.tabs(["📋 Campo", "⚙️ Pré-calculos", "🧭 Azimutes Transportados", "📍 Provisórias", "📊 Erros", "✅ Finais (Bowditch)"])
+            t1, t_red, t2, t3, t4, t5, t6 = st.tabs([
+                "📋 Campo",
+                "📐 Caderneta Reduzida",
+                "⚙️ Pré-calculos",
+                "🧭 Azimutes Transportados",
+                "📍 Provisórias",
+                "📊 Erros",
+                "✅ Finais (Bowditch)"
+            ])
             with t1: st.dataframe(simulator.format_df_for_display(st.session_state.survey_data), use_container_width=True)
+            with t_red:
+                formatted_reduced = simulator.format_df_for_display(reduced_data)
+                st.dataframe(formatted_reduced, use_container_width=True)
+                csv_data = formatted_reduced.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Baixar Caderneta Reduzida (CSV)",
+                    data=csv_data,
+                    file_name="caderneta_reduzida.csv",
+                    mime="text/csv"
+                )
             with t2:
                 if challenge_mode: st.info("Modo Desafio Ativo.")
                 else: st.dataframe(simulator.format_df_for_display(pre), use_container_width=True)
